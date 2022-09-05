@@ -27,14 +27,45 @@ def trim(frame):
     if not np.sum(frame[:,-1]):
         return trim(frame[:,:-2])
     return frame
-def fixHMatrixStitch(frames, H):
+def fixHMatrixStitch(frames, H, shapes):
     img1 = frames[1]
     img2 = frames[0]
+    startTime = time.time()
+    dst = cv2.warpPerspective(img1, H, (shapes[0][1] + shapes[1][1], shapes[0][0]))
+    print(time.time() - startTime)
 
-    dst = cv2.warpPerspective(img1, H, (img2.shape[1] + img1.shape[1], img1.shape[0]))
     shift = 0
-    dst[0:img2.shape[0], 0+shift:img2.shape[1]+shift    ] = img2
+    startTime = time.time()
+    #img1 = cv2.UMat.get(img1)
+    #img2 = cv2.UMat.get(img2)
+#    dst = cv2.UMat.get(dst)
+    dst[0:shapes[0][0], 0 + shift:shapes[0][1] + shift] = img2
     return dst
+
+def fixHMatrixStitchGPU(frames, GPU_frames, H):
+    #test = cv2.cvtColor(frames[1], cv2.COLOR_BGR2GRAY)
+    #img1 =cv2.cuda_GpuMat
+    #img1.upload(test)
+    #img2 =cv2.cuda_GpuMat
+    #img2.upload(frames[0])
+
+    img1 = GPU_frames[1]
+    img2 = GPU_frames[0]
+    test = img2.size()
+    #print(type(test))
+    startStitchtime = time.time()
+    dst = cv2.cuda.warpPerspective(img1, H, (img2.size()[0] + img1.size()[0], img1.size()[1]))
+    shift = 0
+    start_time = time.time()
+    #temp_img_1 = img1.download()
+    #temp_img_2 = img2.download()
+    dst_temp = dst.download()
+    download_time = time.time() -start_time
+    print(str(download_time))
+    dst_temp[0:frames[0].shape[0], 0 + shift:frames[0].shape[1] + shift] = frames[0]
+    #print(time.time() - startStitchtime - download_time)
+    return dst_temp
+
 def partitionKeypoints(img1, kp1, des1):
     regions = [[],[],[],[]]
     out_kp = []
@@ -141,7 +172,7 @@ def getHMatrixRegions(frames):
     MIN_MATCH_COUNT = 10
 
     # Initiate SIFT detector
-    sift = cv2.SIFT_create()
+    sift =  cv2.SIFT_create()
     # find the keypoints and descriptors with SIFT
     # temporary for testing, set frames to first 2 frames in the input array
     # this should be changed later to fully support long arrays of frames
@@ -152,29 +183,40 @@ def getHMatrixRegions(frames):
     mid_x = int(img1.shape[1] / 2)
     mid_y = int(img1.shape[0] / 2)
 
-
+    regions_boundries_1 = []
+    regions_boundries_2 = []
     #Below are keypoints for 4 segments
-    #regions_boundries_1 = [((0,mid_x),(0,mid_y)),((mid_x,img1.shape[1]),(0,mid_y)),((0,mid_x),(mid_y,img1.shape[0])),((mid_x, img1.shape[1]),(mid_y,img1.shape[0]))]
-    #regions_boundries_2 = [((0,mid_x),(0,mid_y)),((mid_x,img2.shape[1]),(0,mid_y)),((0,mid_x),(mid_y,img2.shape[0])),((mid_x, img2.shape[1]),(mid_y,img2.shape[0]))]
+    regions_boundries_1 = [((0,mid_x),(0,mid_y)),((mid_x,img1.shape[1]),(0,mid_y)),((0,mid_x),(mid_y,img1.shape[0])),((mid_x, img1.shape[1]),(mid_y,img1.shape[0]))]
+    regions_boundries_2 = [((0,mid_x),(0,mid_y)),((mid_x,img2.shape[1]),(0,mid_y)),((0,mid_x),(mid_y,img2.shape[0])),((mid_x, img2.shape[1]),(mid_y,img2.shape[0]))]
     boundary5 = (int(mid_x/2),int(mid_x + mid_x/2),int(mid_y/2),int(mid_y + mid_y/2))
     regions_boundries_1 = [(0, mid_x, 0, mid_y), (mid_x, img1.shape[1],0, mid_y),
                            (0, mid_x, mid_y, img1.shape[0]), (mid_x, img1.shape[1], mid_y, img1.shape[0]),boundary5]
     regions_boundries_2 = [(0,mid_x,0,mid_y),(mid_x,img2.shape[1],0,mid_y),(0,mid_x,mid_y,img2.shape[0]),(mid_x, img2.shape[1],mid_y,img2.shape[0]),boundary5]
 
     #Try slices instead
-    #point_0 = 0
-    #point_1 = img1.shape[1]/5
-    #step = (img1.shape[1]/5)/2
-    #regions_boundries_1 = []
-    #regions_boundries_2 = []
-    #while(point_1 <= img1.shape[0]):
-    #    regions_boundries_1.append((0,img1.shape[1],point_0,point_1))
-    #    #temp_step = step
-    #    point_0 += step
-    #    point_1 += step
-    #if(point_1 < img1.shape[0]):
-    #    regions_boundries_1.append((0,img1.shape[1],point_0,img1.shape[0]))
+    point_0 = 0
+    point_1 = img1.shape[1]/5
+    step = (img1.shape[1]/5)/2
+    #horitzontal slices
+    while(point_1 <= img1.shape[0]):
+        regions_boundries_1.append((0,img1.shape[1],point_0,point_1))
+        #temp_step = step
+        point_0 += step
+        point_1 += step
+    if(point_1 < img1.shape[0]):
+        regions_boundries_1.append((0,img1.shape[1],point_0,img1.shape[0]))
+    #vertical slices
+    point_0 = 0
+    point_1 = img1.shape[0] / 5
+    step = (img1.shape[0] / 5) / 2
 
+    while (point_1 <= img1.shape[0]):
+        regions_boundries_1.append((point_0, point_1,0, img1.shape[0]))
+        # temp_step = step
+        point_0 += step
+        point_1 += step
+    if (point_1 < img1.shape[0]):
+        regions_boundries_1.append((point_0, img1.shape[0],0, img1.shape[0] ))
     regions_1 = partitionKeypoints2(img1, kp1, des1,regions_boundries_1)
     regions_1 = cutSmallestRegions(regions_1)
     #print(len(regions_1[0]))
@@ -284,6 +326,7 @@ def getHMatrixRegions(frames):
         matchesMask = None
         return None
     return H
+
 def getHMatrix(frames):
     H = None
     MIN_MATCH_COUNT = 10
@@ -541,7 +584,7 @@ def stitchVideos(videos, fps):
     hmatrixtime = ""
     #out_0 = cv2.VideoWriter("output_stitcher.mp4", fourcc, 10.0, (1280, 720))
     out_1 = cv2.VideoWriter("output_regional_h.mp4", fourcc, 10.0, (1280, 720))
-
+    #uMatTest = cv2.UMat(720,1280,cv2.CV_8UC3)
     H = None
     stitcher = cv2.Stitcher_create(cv2.STITCHER_PANORAMA)
     caps = []
@@ -557,20 +600,24 @@ def stitchVideos(videos, fps):
     cams_up = True
     while cams_up:
         frames = []
+        shapes = []
         for cap in caps:
-            holder = cap.read()
+            ret, uMatTest = cap.read()
+            shapes.append(uMatTest.shape)
             #if frame collection fails
-            if not holder[0]:
+            if not ret:
                 cams_up = False
                 break
-            frames.append(holder[1])
+            #frames.append(cv2.UMat(uMatTest))
+            frames.append(uMatTest)
+           # frames.append(cv2.UMat(cv2.cvtColor(uMatTest,cv2.COLOR_BGRGRAY))
 
         #ret2, frame2 = cap2.read()
         #ret3, frame3 = cap3.read()
 
         if count <=frame_skip:
             count += 1
-            print(count)
+            #print(count)
             continue
 
         #count +=1
@@ -579,7 +626,102 @@ def stitchVideos(videos, fps):
             #H = getHMatrix(frames)
             H = getHMatrixRegions(frames)
             print("=====================\nTime: "+str(time.time() - startTime))
-            init_stitch = fixHMatrixStitch(frames, H)
+            init_stitch = fixHMatrixStitch(frames, H,shapes)
+            cv2.imwrite("Init_stitch_sub.jpg", init_stitch)
+            #joined2 = np.concatenate(frames, axis=1)
+            #cv2.imwrite("joined_cameras.jpg", joined2)
+        count +=1
+        #startTime = time.time()
+
+        #try:
+        #    joined = stitcher.stitch([frames[0], frames[1]])
+        #except cv2.error:
+        #    print("boop")
+        #stitcher_time += str(time.time() - startTime) + "\n"
+
+        #result = stitchImagesRandomized(0.5,frames[1], frames[2])
+        #cv2.imshow("half",result[1])
+        startTime = time.time()
+        #openCVStitchImplentation(frames)
+        fixed_h_result = fixHMatrixStitch(frames, H,shapes)
+        fixed_H_time += str(time.time() - startTime) + "\n"
+        #if(joined[1] is not None):
+        #    joined_out = cv2.resize(joined[1], (1280,720))
+        #    out_0.write(joined_out)
+        startTime = time.time()
+        #H = getHMatrixRegions(frames)
+        #hmatrixtime += str(time.time() - startTime) + "\n"
+        #gen_image = fixHMatrixStitch(frames,H)
+        #cv2.imwrite("frames_new\\image_" + str(count)+".jpg", fixed_h_result)
+        fixed_h_result = cv2.resize(fixed_h_result, (1280,720))
+        out_1.write(fixed_h_result)
+        #cv2.namedWindow("joined_cameras", cv2.WINDOW_NORMAL)
+        #cv2.namedWindow("joined2", cv2.WINDOW_NORMAL)
+       # cv2.imwrite("Cameraas_side_by_side.jpg", joined2)
+        #cv2.imwrite("local_class_frame_1_2.jpg", joined)
+        #cv2.imshow("joined_cameras", joined)
+        #print(joined)
+        #cv2.imshow("joined",joined[1])
+
+        #cv2.imshow("joined2",result[1])
+        #cv2.waitKey(0)
+        if count > frame_skip+1000:
+            break
+    with open('stitcher_times.csv', 'w') as outfile:
+        outfile.write(stitcher_time)
+    with open('fixed_h_times.csv', 'w') as outfile:
+        outfile.write(fixed_H_time)
+    #with open('h_matrix_gen_time.csv', 'w') as outfile:
+    #    outfile.write(hmatrixtime)
+def stitchVideosGPU(videos, fps):
+    frame_skip = 800
+    #frame_skip_cams = [2,0,0]
+
+    fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
+    stitcher_time = ""
+    fixed_H_time = ""
+    hmatrixtime = ""
+    #out_0 = cv2.VideoWriter("output_stitcher.mp4", fourcc, 10.0, (1280, 720))
+    out_1 = cv2.VideoWriter("output_regional_h.mp4", fourcc, 10.0, (1280, 720))
+
+    H = None
+    stitcher = cv2.Stitcher_create(cv2.STITCHER_PANORAMA)
+    caps = []
+    for video in videos:
+        caps.append((cv2.VideoCapture(video)))
+
+    count = 0
+    cams_up = True
+    while cams_up:
+        frames = []
+        GPU_frames = []
+        for cap in caps:
+            holder = cap.read()
+            #if frame collection fails
+            if not holder[0]:
+                cams_up = False
+                break
+            test = cv2.cuda_GpuMat()
+            test.upload(holder[1])
+            GPU_frames.append(test)
+            frames.append(holder[1])
+
+        #ret2, frame2 = cap2.read()
+        #ret3, frame3 = cap3.read()
+
+        if count <=frame_skip:
+            count += 1
+            #print(count)
+            continue
+
+        #count +=1
+        if H is None:
+            startTime = time.time()
+            #H = getHMatrix(frames)
+            H = getHMatrixRegions(frames)
+            print("=====================\nTime: "+str(time.time() - startTime))
+
+            init_stitch = fixHMatrixStitchGPU(frames,GPU_frames, H)
             cv2.imwrite("Init_stitch_sub.jpg", init_stitch)
             joined2 = np.concatenate(frames, axis=1)
             cv2.imwrite("joined_cameras.jpg", joined2)
@@ -596,7 +738,7 @@ def stitchVideos(videos, fps):
         #cv2.imshow("half",result[1])
         startTime = time.time()
         #openCVStitchImplentation(frames)
-        fixed_h_result = fixHMatrixStitch(frames, H)
+        fixed_h_result = fixHMatrixStitchGPU(frames,GPU_frames, H)
         fixed_H_time += str(time.time() - startTime) + "\n"
         #if(joined[1] is not None):
         #    joined_out = cv2.resize(joined[1], (1280,720))
