@@ -31,7 +31,8 @@ def trim(frame):
         return trim(frame[:, :-2])
     return frame
 
-def get_seam_overlap(H, img1, img2, shapes):
+
+def get_overlap_corners(H, img1, img2, shapes):
     h, w, c = img2.shape
     pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
     corners = cv2.perspectiveTransform(pts, H)
@@ -41,11 +42,13 @@ def get_seam_overlap(H, img1, img2, shapes):
     y_max = min(corners[1][0][1], corners[2][0][1])
 
     return (int(x_min), int(y_min), int(x_max), int(y_max))
+
+
 def generate_masks(H, img1, img2, shapes):
     h, w, c = shapes[0]
     pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
     corners = cv2.perspectiveTransform(pts, H)
-    #print(corners)
+    # print(corners)
     # compare [0][0] and [1][0], take greater value
     # compare [2][0] and [3][0], take smaller value
     # compare [0][1] and [3][1], take greater value
@@ -55,7 +58,6 @@ def generate_masks(H, img1, img2, shapes):
     x_max = min(corners[2][0][0], corners[3][0][0])
     y_min = max(corners[0][0][1], corners[3][0][1])
     y_max = min(corners[1][0][1], corners[2][0][1])
-
 
     dst = cv2.warpPerspective(img1, H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
     img2 = cv2.copyMakeBorder(img2, 0, 0, 0, 500, cv2.BORDER_CONSTANT)
@@ -70,11 +72,11 @@ def generate_masks(H, img1, img2, shapes):
     test = cv2.UMat.get(overlap)
     overlap_coords = cv2.UMat.get(overlap_coords)
     sub_arr_mask = np.zeros(size, dtype=np.uint8)
-    inv_arr_mask = np.ones(size, dtype=np.uint8)*255
-    #inv_arr_mask = np.ones(size, dtype=np.uint8)
+    inv_arr_mask = np.ones(size, dtype=np.uint8) * 255
+    # inv_arr_mask = np.ones(size, dtype=np.uint8)
     sub_arr = np.zeros(size_2, dtype=np.uint8)
-    inv_arr = np.ones(size_2, dtype=np.uint8)*255
-    #inv_arr = np.ones(size_2, dtype=np.uint8)
+    inv_arr = np.ones(size_2, dtype=np.uint8) * 255
+    # inv_arr = np.ones(size_2, dtype=np.uint8)
     inv_arr_2 = np.ones(size_2, dtype=np.uint8)
     # cv2.imshow("dst",dst)
     for coord in overlap_coords:
@@ -87,19 +89,19 @@ def generate_masks(H, img1, img2, shapes):
             sub_arr_mask[y][x] = 255
             inv_arr[y][x] = [0, 0, 0]
             inv_arr_mask[y][x] = 0
-    #sub_arr = cv2.bitwise_not(inv_arr)
-   # cv2.imshow("sub_arr",sub_arr)
-    #cv2.imshow("inv_arr",inv_arr_mask)
+    # sub_arr = cv2.bitwise_not(inv_arr)
+    # cv2.imshow("sub_arr",sub_arr)
+    # cv2.imshow("inv_arr",inv_arr_mask)
 
-    #cv2.waitKey(0)
-    return sub_arr, inv_arr,inv_arr_mask,inv_arr_2
+    # cv2.waitKey(0)
+    return sub_arr, inv_arr, inv_arr_mask, inv_arr_2
 
 
 def getOverlapRegionCornerBased(img1, img2, shapes, H, overlap_mask, inv_arr, inv_arr_mask):
     h, w, c = shapes[0]
     pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
     corners = cv2.perspectiveTransform(pts, H)
-    #print(corners)
+    # print(corners)
     # compare [0][0] and [1][0], take greater value
     # compare [2][0] and [3][0], take smaller value
     # compare [0][1] and [3][1], take greater value
@@ -141,10 +143,12 @@ def getOverlapRegionCornerBased(img1, img2, shapes, H, overlap_mask, inv_arr, in
     test = None
     test_mask = None
     out, out_mask = blender.blend(test, test_mask)
-    #print(time.time() - startTime)
-    #plt.imshow(cv2.cvtColor(out.astype('uint8'), cv2.COLOR_BGR2RGB))
-    #plt.show()
+    # print(time.time() - startTime)
+    # plt.imshow(cv2.cvtColor(out.astype('uint8'), cv2.COLOR_BGR2RGB))
+    # plt.show()
     return np.array(out)
+
+
 # img2 = cv2.polylines(img2, [np.int32(dst)], True, 255, 3, cv2.LINE_AA)
 def getOverlapRegionMultBased(frames, H, shapes, sub_arr, inv_arr, inv_arr_2):
     img1 = frames[1]
@@ -154,7 +158,7 @@ def getOverlapRegionMultBased(frames, H, shapes, sub_arr, inv_arr, inv_arr_2):
     # img2 = cv2.add(img2, add_one)
     # img1 = cv2.add(img1, add_one)
 
-    #startTime = time.time()
+    # startTime = time.time()
     img2_border = cv2.copyMakeBorder(img2, 0, 0, 0, 500, cv2.BORDER_CONSTANT)
     alpha = 0.1
     beta = 1 - alpha
@@ -178,13 +182,15 @@ def getOverlapRegionMultBased(frames, H, shapes, sub_arr, inv_arr, inv_arr_2):
     # cv2.waitKey(0)
     dst = cv2.add(dst, combined)
 
-    #print(time.time() - startTime)
+    # print(time.time() - startTime)
     return dst
+
+
 def getOverlapRegionCudaBased(frames, H, shapes, sub_arr, inv_arr, inv_arr_2):
-    #img1 = cv2.cuda_GpuMat()
-    #img2 = cv2.cuda_GpuMat()
-    #img1.upload(frames[1])
-    #img2.upload(frames[0])
+    # img1 = cv2.cuda_GpuMat()
+    # img2 = cv2.cuda_GpuMat()
+    # img1.upload(frames[1])
+    # img2.upload(frames[0])
     img1 = frames[1]
     img2 = frames[0]
     # add_one = np.ones((shapes[0][0], shapes[0][1], 3), dtype=np.uint8)
@@ -192,7 +198,7 @@ def getOverlapRegionCudaBased(frames, H, shapes, sub_arr, inv_arr, inv_arr_2):
     # img2 = cv2.add(img2, add_one)
     # img1 = cv2.add(img1, add_one)
 
-    #startTime = time.time()
+    # startTime = time.time()
     img2_border = cv2.cuda.copyMakeBorder(img2, 0, 0, 0, 500, cv2.BORDER_CONSTANT)
     alpha = 0.5
     beta = 1 - alpha
@@ -216,94 +222,141 @@ def getOverlapRegionCudaBased(frames, H, shapes, sub_arr, inv_arr, inv_arr_2):
     # cv2.waitKey(0)
     dst = cv2.cuda.add(dst, combined)
 
-    #print(time.time() - startTime)
+    # print(time.time() - startTime)
     return dst
-def seamEstimation(img1,img2):
+
+
+def seamEstimation(img1, img2):
     img1_gray = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
     img2_gray = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
 
     seam_x = -1
     best_column = None
-    column_width = int(img2.shape[1]/10)
+    column_width = int(img2.shape[1] / 10)
     curr_x = 0
     sums = []
     while curr_x < img2.shape[1]:
         result = 0
-        result = (img1_gray[:,curr_x:curr_x+column_width] - img2_gray[:,curr_x:curr_x+column_width]).sum()
-        #result2 = img1[:,curr_x:curr_x+column_width].sum() -img2[:,curr_x:curr_x+column_width].sum()
-        #result = np.mean()
+        result = (img1_gray[:, curr_x:curr_x + column_width] - img2_gray[:, curr_x:curr_x + column_width]).sum()
+        # result2 = img1[:,curr_x:curr_x+column_width].sum() -img2[:,curr_x:curr_x+column_width].sum()
+        # result = np.mean()
         sums.append(result)
         print(result)
 
-        curr_x+=column_width
+        curr_x += column_width
     print(sums)
-        #cv2.imshow("result",result)
-        #cv2.waitKey(0)
+    # cv2.imshow("result",result)
+    # cv2.waitKey(0)
+
+
 def blendWeightedCustom(img1, img2, alpha, beta, gamma):
     result = img1
-    for row in range(0,img2.shape[0]-1):
-        for col in range(0,img2.shape[1]-1):
+    for row in range(0, img2.shape[0] - 1):
+        for col in range(0, img2.shape[1] - 1):
             pixel = 0
             if img1[row][col][0] == [0] and img1[row][col][1] == 0:
                 pixel = img2[row][col]
             elif img2[row][col][0] == 0 and img2[row][col][1] == 0:
                 pixel = img1[row][col]
             else:
-                pixel = img1[row][col] * alpha  + img2[row][col] * beta+ gamma
+                pixel = img1[row][col] * alpha + img2[row][col] * beta + gamma
             result[row][col] = pixel
     cv2.imshow("result", result)
     cv2.waitKey(0)
     return result
-def cpuStitch(frames, H,shapes):
+
+
+def calc_sloped_coord(coor_0, coor_1, x_value):
+    slope = (coor_0[1] - coor_1[1]) / (coor_0[0] - coor_1[0])
+    y_value = slope * (x_value-coor_1[0] ) + coor_1[1]
+    return x_value, y_value
+
+
+def get_seams(img1, img2, H, seam_size):
+    h, w, c = img2.shape
+    pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
+    corners = cv2.perspectiveTransform(pts, H)
+    # note order is [x,y]
+    bottom_right = corners[2][0]
+    bottom_left = corners[1][0]
+    top_left = corners[0][0]
+    top_right = corners[3][0]
+    startTime = time.time()
+
+    pos_top = calc_sloped_coord(top_left, top_right, w)
+    pos_bot = calc_sloped_coord(bottom_left, bottom_right, w)
+    seam_1 = img1[int(pos_top[1]):int(pos_bot[1]), int(top_right[0]) - seam_size:int(img2.shape[1])]
+    seam_2 = img2[int(pos_top[1]):int(pos_bot[1]), int(top_right[0]) - seam_size:int(img2.shape[1])]
+    pos = (int(top_right[0]) - seam_size, top_right[1])
+    # cv2.imshow("seam1", seam_1)
+    # cv2.imshow("seam2", seam_2)
+
+    # cv2.waitKey(0)
+    seam_join = edgeWeightedBlending(seam_2, seam_1)
+    print(time.time() - startTime)
+
+    img1[0:img2.shape[0], 0:img2.shape[1]] = img2
+    img1[int(pos_top[1]):int(pos_bot[1]), int(top_right[0]) - seam_size:int(img2.shape[1])] = seam_join
+    #cv2.imshow("dst",img1)
+    #cv2.waitKey(0)
+
+
+# return result
+# return (int(x_min), int(y_min), int(x_max), int(y_max))
+def cpuStitch(frames, H, shapes):
     img1 = frames[1]
     img2 = frames[0]
-    seam_pts = get_seam_overlap(H, img1, img2, shapes)
+    seam_pts = get_overlap_corners(H, img1, img2, shapes)
     shift = 0
     startTime = time.time()
     dst = cv2.warpPerspective(img1, H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
     warpTime = time.time() - startTime
-    shape = img2.shape[0] - 1, img2.shape[1]-1
-    cv2.imwrite("Dst.jpg", dst[0:img2.shape[0],0:img2.shape[1]])
-    cv2.imwrite("img2.jpg", img2)
-    #seam_dst = dst[seam_pts[1]:seam_pts[3],img2.shape[1]-10:img2.shape[1]]
-    #seam_img2 = img2[seam_pts[1]:seam_pts[3],img2.shape[1]-10:img2.shape[1]]
-    overlap_dst = dst[seam_pts[1]-20:seam_pts[3], seam_pts[0]:img2.shape[1]]
-    overlap_2 = img2[seam_pts[1]-20:seam_pts[3], seam_pts[0]:img2.shape[1]]
+    result = get_seams(dst, img2, H, 300)
+
+    shape = img2.shape[0] - 1, img2.shape[1] - 1
+    # cv2.imwrite("Dst.jpg", dst[0:img2.shape[0],0:img2.shape[1]])
+    # cv2.imwrite("img2.jpg", img2)
+    # seam_dst = dst[seam_pts[1]:seam_pts[3],img2.shape[1]-10:img2.shape[1]]
+    # seam_img2 = img2[seam_pts[1]:seam_pts[3],img2.shape[1]-10:img2.shape[1]]
+    overlap_dst = dst[seam_pts[1] - 20:seam_pts[3], seam_pts[0]:img2.shape[1]]
+    overlap_2 = img2[seam_pts[1] - 20:seam_pts[3], seam_pts[0]:img2.shape[1]]
     startTime = time.time()
 
-    #seamEstimation(overlap_dst,overlap_2)
+    # seamEstimation(overlap_dst,overlap_2)
     alpha = 0.2
 
-    beta = 1-alpha
+    beta = 1 - alpha
     gamma = 0.0
-    #seam_join = edgeWeightedBlending(seam_img2,seam_dst)
-    seam_join = edgeWeightedBlending(overlap_2,overlap_dst)
+    # seam_join = edgeWeightedBlending(seam_img2,seam_dst)
+    seam_join = edgeWeightedBlending(overlap_2, overlap_dst)
     blendTime = time.time() - startTime
-    #seam_join = blendWeightedCustom(dst,img2,alpha,beta,gamma)
-    #seam_join = cv2.addWeighted(seam_dst, alpha, seam_img2, beta, gamma)
-    #cv2.imshow("Seam", seam_join)
-    #cv2.imshow("dst", seam_img2)
+    # seam_join = blendWeightedCustom(dst,img2,alpha,beta,gamma)
+    # seam_join = cv2.addWeighted(seam_dst, alpha, seam_img2, beta, gamma)
+    # cv2.imshow("Seam", seam_join)
+    # cv2.imshow("dst", seam_img2)
 
-    #cv2.waitKey(0)
+    # cv2.waitKey(0)
     startTime = time.time()
     dst[0:img2.shape[0], 0 + shift:img2.shape[1] + shift] = img2
-    dst[seam_pts[1]-20:seam_pts[3], seam_pts[0]:img2.shape[1]] = seam_join
+    dst[seam_pts[1] - 20:seam_pts[3], seam_pts[0]:img2.shape[1]] = seam_join
     join_time = time.time() - startTime
-    cv2.imshow("right", dst)
-    cv2.waitKey(0)
-    print(str(warpTime) + "," +str(blendTime) + "," + str(join_time))
+    # cv2.imshow("right", dst)
+    # cv2.waitKey(0)
+    # print(str(warpTime) + "," +str(blendTime) + "," + str(join_time))
     return dst
-    #cv2.imshow("img2",img2)
+    # cv2.imshow("img2",img2)
 
-    #cv2.imshow("dst",dst)
-    #cv2.waitKey(0)
-def fixHMatrixStitch(frames, H, shapes, sub_arr, inv_arr,inv_arr_mask,inv_arr_2):
-    #startTime = time.time()
-    dst = cpuStitch(frames, H,shapes)
-    #dst = getOverlapRegionMultBased(frames, H, shapes, sub_arr, inv_arr, inv_arr_2)
-    #dst = getOverlapRegionCornerBased(frames[1], frames[0], shapes, H, sub_arr, inv_arr, inv_arr_mask)
-    #dst = getOverlapRegionCudaBased(frames, H, shapes, sub_arr, inv_arr, inv_arr_2)
-    #print(time.time() - startTime)
+    # cv2.imshow("dst",dst)
+    # cv2.waitKey(0)
+
+
+def fixHMatrixStitch(frames, H, shapes, sub_arr, inv_arr, inv_arr_mask, inv_arr_2):
+    # startTime = time.time()
+    dst = cpuStitch(frames, H, shapes)
+    # dst = getOverlapRegionMultBased(frames, H, shapes, sub_arr, inv_arr, inv_arr_2)
+    # dst = getOverlapRegionCornerBased(frames[1], frames[0], shapes, H, sub_arr, inv_arr, inv_arr_mask)
+    # dst = getOverlapRegionCudaBased(frames, H, shapes, sub_arr, inv_arr, inv_arr_2)
+    # print(time.time() - startTime)
     return dst
 
 
@@ -325,7 +378,7 @@ def fixHMatrixStitchGPU(frames, GPU_frames, H):
     # temp_img_2 = img2.download()
     dst_temp = dst.download()
     # download_time = time.time() -start_time
-    #print(str(download_time))
+    # print(str(download_time))
     dst_temp[0:frames[0].shape[0], 0 + shift:frames[0].shape[1] + shift] = frames[0]
     # print(time.time() - startStitchtime - download_time)
     return dst
@@ -436,6 +489,7 @@ def cutSmallestRegions(regions, num_to_cut=1):
     # print("region:" + str(len(regions[0])))
     return regions
 
+
 def verticalSlices(shapes, regions_boundries_1):
     point_0 = 0
     point_1 = shapes[0][0] / 5
@@ -448,6 +502,8 @@ def verticalSlices(shapes, regions_boundries_1):
         point_1 += step
     if (point_1 < shapes[0][0]):
         regions_boundries_1.append((point_0, shapes[0][0], 0, shapes[0][0]))
+
+
 def getHMatrixRegions(frames, shapes):
     H = None
     MIN_MATCH_COUNT = 10
@@ -465,16 +521,16 @@ def getHMatrixRegions(frames, shapes):
     mid_y = int(img1.shape[0] / 2)
 
     regions_boundries_1 = []
-    #regions_boundries_2 = []
+    # regions_boundries_2 = []
     # Below are keypoints for 4 segments
-    #regions_boundries_1 = [((0, mid_x), (0, mid_y)), ((mid_x, img1.shape[1]), (0, mid_y)),
+    # regions_boundries_1 = [((0, mid_x), (0, mid_y)), ((mid_x, img1.shape[1]), (0, mid_y)),
     #                       ((0, mid_x), (mid_y, img1.shape[0])), ((mid_x, img1.shape[1]), (mid_y, img1.shape[0]))]
-    #regions_boundries_2 = [((0, mid_x), (0, mid_y)), ((mid_x, img2.shape[1]), (0, mid_y)),
+    # regions_boundries_2 = [((0, mid_x), (0, mid_y)), ((mid_x, img2.shape[1]), (0, mid_y)),
     #                       ((0, mid_x), (mid_y, img2.shape[0])), ((mid_x, img2.shape[1]), (mid_y, img2.shape[0]))]
-   # boundary5 = (int(mid_x / 2), int(mid_x + mid_x / 2), int(mid_y / 2), int(mid_y + mid_y / 2))
-    #regions_boundries_1 = [(0, mid_x, 0, mid_y), (mid_x, img1.shape[1], 0, mid_y),
-     #                      (0, mid_x, mid_y, img1.shape[0]), (mid_x, img1.shape[1], mid_y, img1.shape[0]), boundary5]
-    #regions_boundries_2 = [(0, mid_x, 0, mid_y), (mid_x, img2.shape[1], 0, mid_y), (0, mid_x, mid_y, img2.shape[0]),
+    # boundary5 = (int(mid_x / 2), int(mid_x + mid_x / 2), int(mid_y / 2), int(mid_y + mid_y / 2))
+    # regions_boundries_1 = [(0, mid_x, 0, mid_y), (mid_x, img1.shape[1], 0, mid_y),
+    #                      (0, mid_x, mid_y, img1.shape[0]), (mid_x, img1.shape[1], mid_y, img1.shape[0]), boundary5]
+    # regions_boundries_2 = [(0, mid_x, 0, mid_y), (mid_x, img2.shape[1], 0, mid_y), (0, mid_x, mid_y, img2.shape[0]),
     #                       (mid_x, img2.shape[1], mid_y, img2.shape[0]), boundary5]
 
     # Try slices instead
@@ -490,16 +546,16 @@ def getHMatrixRegions(frames, shapes):
     if (point_1 < img1.shape[0]):
         regions_boundries_1.append((0, img1.shape[1], point_0, img1.shape[0]))
     # vertical slices
-    #point_0 = 0
-    #point_1 = img1.shape[0] / 5
-    #step = (img1.shape[0] / 5) / 2
+    # point_0 = 0
+    # point_1 = img1.shape[0] / 5
+    # step = (img1.shape[0] / 5) / 2
 
-    #while (point_1 <= img1.shape[0]):
+    # while (point_1 <= img1.shape[0]):
     #    regions_boundries_1.append((point_0, point_1, 0, img1.shape[0]))
     #    # temp_step = step
     #    point_0 += step
     #    point_1 += step
-    #if (point_1 < img1.shape[0]):
+    # if (point_1 < img1.shape[0]):
     #    regions_boundries_1.append((point_0, img1.shape[0], 0, img1.shape[0]))
     regions_1 = partitionKeypoints2(img1, kp1, des1, regions_boundries_1)
     regions_1 = cutSmallestRegions(regions_1)
@@ -529,17 +585,17 @@ def getHMatrixRegions(frames, shapes):
     for region_1 in regions_1[1]:
         region_index_2 = 0
 
-        j=0
+        j = 0
         test1 = np.array(region_1)
         for region_2 in regions_2[1]:
-            j+=1
+            j += 1
             test2 = np.array(region_2)
             if (region_index_1 != region_index_2):
                 # region_2[1] = np.array(region_2[1])
 
                 # print(type(des1[0]))
                 # print(type(region_1[1][1]))
-                #print(str(i) + " : " + str(j))
+                # print(str(i) + " : " + str(j))
                 matches = flann.knnMatch(test1, test2, k=2)
                 # store all the good matches as per Lowe's ratio test.
                 good = []
@@ -614,6 +670,7 @@ def getHMatrixRegions(frames, shapes):
         matchesMask = None
         return None
     return H
+
 
 def getHMatrix(frames):
     H = None
@@ -803,20 +860,23 @@ def stitchImagesRandomized(alpha, img_1, img_2):
     #    outfile.write(out_csv)
     return (0, dst)
 
+
 def edgeWeightedBlending(left_img, right_img):
     try:
         if left_img.shape != left_img.shape:
             raise
-        #We need to weigh the blending by how close the pixel is to each edge
-        #If close to the left side, we weigh more heavily in favor of the left image, and the same logic for the right
-        #For now, we can just treat it as if there are only left and right sides, top and bottom can be done later
+        # We need to weigh the blending by how close the pixel is to each edge
+        # If close to the left side, we weigh more heavily in favor of the left image, and the same logic for the right
+        # For now, we can just treat it as if there are only left and right sides, top and bottom can be done later
         result = left_img
-
+        edge_blend_window = 200
         columns = left_img.shape[1]
-        for i in range(0,columns):
-            factor = (columns -i)/columns
-            result[:,i] = left_img[:,i] *  factor+  right_img[:,i] * (1-factor)
-        #cv2.imshow("left", left_img)
+        rows = left_img.shape[0]
+        for i in range(0, columns):
+            # factor = ((columns -i)/columns + (rows - j)/rows)/2
+            factor = (columns - i) / columns
+            result[:, i] = left_img[:, i] * factor + right_img[:, i] * (1 - factor)
+        # cv2.imshow("left", left_img)
         return result
     except():
         print("Matrices are not the same shape")
@@ -849,8 +909,8 @@ def stitchVideos(videos, fps):
     cams_up = True
     #    print(str(warpTime) + "," +str(blendTime) + "," + str(join_time))
 
-    #print("warpTime","startTime,joinTime")
-    #print("videoReadTime")
+    # print("warpTime","startTime,joinTime")
+    # print("videoReadTime")
     while cams_up:
         frames = []
         shapes = []
@@ -858,7 +918,7 @@ def stitchVideos(videos, fps):
         for cap in caps:
             startTime = time.time()
             ret, uMatTest = cap.read()
-            #print(time.time() - startTime)
+            # print(time.time() - startTime)
             shapes.append(uMatTest.shape)
             # if frame collection fails
             if not ret:
@@ -880,11 +940,11 @@ def stitchVideos(videos, fps):
         # count +=1
         if H is None:
             startTime = time.time()
-            #H = getHMatrix(frames)
+            # H = getHMatrix(frames)
             H = getHMatrixRegions(frames_og, shapes)
-           # print("=====================\nTime: " + str(time.time() - startTime))
-            sub_arr, inv_arr, inv_arr_mask,inv_arr_2 = generate_masks(H, frames[1], frames[2], shapes)
-            init_stitch = fixHMatrixStitch(frames_og, H, shapes, sub_arr, inv_arr,inv_arr_mask,inv_arr_2)
+            # print("=====================\nTime: " + str(time.time() - startTime))
+            sub_arr, inv_arr, inv_arr_mask, inv_arr_2 = generate_masks(H, frames[1], frames[2], shapes)
+            init_stitch = fixHMatrixStitch(frames_og, H, shapes, sub_arr, inv_arr, inv_arr_mask, inv_arr_2)
             cv2.imwrite("Init_stitch_sub.jpg", init_stitch)
             joined2 = cv2.hconcat(frames)
             cv2.imwrite("joined_cameras.jpg", joined2)
@@ -901,7 +961,7 @@ def stitchVideos(videos, fps):
         # cv2.imshow("half",result[1])
         startTime = time.time()
         # openCVStitchImplentation(frames)
-        fixed_h_result = fixHMatrixStitch(frames_og, H, shapes,sub_arr,inv_arr,inv_arr_mask,inv_arr_2)
+        fixed_h_result = fixHMatrixStitch(frames_og, H, shapes, sub_arr, inv_arr, inv_arr_mask, inv_arr_2)
         fixed_H_time += str(time.time() - startTime) + "\n"
         # if(joined[1] is not None):
         #    joined_out = cv2.resize(joined[1], (1280,720))
