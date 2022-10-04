@@ -281,6 +281,7 @@ def get_seams(img1, img2, H, seam_size):
     bottom_left = corners[1][0]
     top_left = corners[0][0]
     top_right = corners[3][0]
+
     startTime = time.time()
 
     pos_top = calc_sloped_coord(top_left, top_right, w)
@@ -292,14 +293,18 @@ def get_seams(img1, img2, H, seam_size):
     # cv2.imshow("seam2", seam_2)
 
     # cv2.waitKey(0)
-    seam_join = edgeWeightedBlending(seam_2, seam_1)
+    factors_left, factors_right =computeBlendingMatrix(seam_1)
+    #cv2.imshow("seam1", seam_1)
+    #cv2.imshow("factors_left",factors_left)
+    #cv2.waitKey(0)
+    seam_join = edgeWeightedBlending(seam_2, seam_1,factors_left, factors_right)
     print(time.time() - startTime)
-
-    img1[0:img2.shape[0], 0:img2.shape[1]] = img2
-    img1[int(pos_top[1]):int(pos_bot[1]), int(top_right[0]) - seam_size:int(img2.shape[1])] = seam_join
+    result = img1
+    result[0:img2.shape[0], 0:img2.shape[1]] = img2
+    result[int(pos_top[1]):int(pos_bot[1]), int(top_right[0]) - seam_size:int(img2.shape[1])] = seam_join
     #cv2.imshow("dst",img1)
     #cv2.waitKey(0)
-
+    return result
 
 # return result
 # return (int(x_min), int(y_min), int(x_max), int(y_max))
@@ -328,7 +333,7 @@ def cpuStitch(frames, H, shapes):
     beta = 1 - alpha
     gamma = 0.0
     # seam_join = edgeWeightedBlending(seam_img2,seam_dst)
-    seam_join = edgeWeightedBlending(overlap_2, overlap_dst)
+    #seam_join = edgeWeightedBlending(overlap_2, overlap_dst)
     blendTime = time.time() - startTime
     # seam_join = blendWeightedCustom(dst,img2,alpha,beta,gamma)
     # seam_join = cv2.addWeighted(seam_dst, alpha, seam_img2, beta, gamma)
@@ -336,14 +341,14 @@ def cpuStitch(frames, H, shapes):
     # cv2.imshow("dst", seam_img2)
 
     # cv2.waitKey(0)
-    startTime = time.time()
-    dst[0:img2.shape[0], 0 + shift:img2.shape[1] + shift] = img2
-    dst[seam_pts[1] - 20:seam_pts[3], seam_pts[0]:img2.shape[1]] = seam_join
+    #startTime = time.time()
+    #dst[0:img2.shape[0], 0 + shift:img2.shape[1] + shift] = img2
+    #dst[seam_pts[1] - 20:seam_pts[3], seam_pts[0]:img2.shape[1]] = seam_join
     join_time = time.time() - startTime
     # cv2.imshow("right", dst)
     # cv2.waitKey(0)
     # print(str(warpTime) + "," +str(blendTime) + "," + str(join_time))
-    return dst
+    return result
     # cv2.imshow("img2",img2)
 
     # cv2.imshow("dst",dst)
@@ -861,7 +866,7 @@ def stitchImagesRandomized(alpha, img_1, img_2):
     return (0, dst)
 
 
-def edgeWeightedBlending(left_img, right_img):
+def edgeWeightedBlendingColumnsOnly(left_img, right_img):
     try:
         if left_img.shape != left_img.shape:
             raise
@@ -880,6 +885,49 @@ def edgeWeightedBlending(left_img, right_img):
         return result
     except():
         print("Matrices are not the same shape")
+
+def computeBlendingMatrix(left_img):
+    row_blend_span = 10
+
+    result = left_img
+    edge_blend_window = 200
+    columns = left_img.shape[1]
+    rows = left_img.shape[0]
+    factors_left = np.zeros(left_img.shape)
+    factors_right = np.zeros(left_img.shape)
+    for i in range(0, columns):
+        for j in range(0, rows):
+            # factor = ((columns -i)/columns + (rows - j)/rows)/2
+            factor = (columns - i) / columns
+            factors_left[j][i] = (factor, factor, factor)
+            factors_right[j][i] = (1 - factor, 1 - factor, 1 - factor)
+    return factors_left, factors_right
+
+def edgeWeightedBlending(left_img, right_img,factors_left, factors_right):
+    try:
+        if left_img.shape != left_img.shape:
+            raise
+        # We need to weigh the blending by how close the pixel is to each edge
+        # If close to the left side, we weigh more heavily in favor of the left image, and the same logic for the right
+        # For now, we can just treat it as if there are only left and right sides, top and bottom can be done later
+
+            #result[:, i] = left_img[:, i] * factor + right_img[:, i] * (1 - factor)
+        result = left_img * factors_left + right_img * factors_right
+        #cv2.imshow(result, "result")
+        #cv2.waitKey(0)
+        #for j in range(0,rows):
+        #    factor = (rows - j) / rows
+        #    if j >= int(rows/2):
+
+        #        result[j, :] = result[j, :] * (1-factor) + right_img[j, :] * (factor)
+        #    else:
+        #        result[j, :] = result[j, :] * (factor) + right_img[j, :] * (1-factor)
+
+        # cv2.imshow("left", left_img)
+        return result
+    except():
+        print("Matrices are not the same shape")
+
 
 
 def stitchVideos(videos, fps):
