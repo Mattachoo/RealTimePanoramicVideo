@@ -282,18 +282,30 @@ def get_seams(img1, img2, H, seam_size):
     top_left = corners[0][0]
     top_right = corners[3][0]
 
-    startTime = time.time()
 
     pos_top = calc_sloped_coord(top_left, top_right, w)
     pos_bot = calc_sloped_coord(bottom_left, bottom_right, w)
-    seam_1 = img1[int(pos_top[1]):int(pos_bot[1]), int(top_right[0]) - seam_size:int(img2.shape[1])]
-    seam_2 = img2[int(pos_top[1]):int(pos_bot[1]), int(top_right[0]) - seam_size:int(img2.shape[1])]
+    seam_1 = img1[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])]
+    seam_2 = img2[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])]
     pos = (int(top_right[0]) - seam_size, top_right[1])
     # cv2.imshow("seam1", seam_1)
     # cv2.imshow("seam2", seam_2)
 
     # cv2.waitKey(0)
     factors_left, factors_right =computeBlendingMatrix(seam_1)
+
+    startTime = time.time()
+
+    pos_top = calc_sloped_coord(top_left, top_right, w)
+    pos_bot = calc_sloped_coord(bottom_left, bottom_right, w)
+    seam_1 = img1[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])]
+    seam_2 = img2[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])]
+    pos = (int(top_right[0]) - seam_size, top_right[1])
+    # cv2.imshow("seam1", seam_1)
+    # cv2.imshow("seam2", seam_2)
+
+    # cv2.waitKey(0)
+    #factors_left, factors_right =computeBlendingMatrix(seam_1)
     #cv2.imshow("seam1", seam_1)
     #cv2.imshow("factors_left",factors_left)
     #cv2.waitKey(0)
@@ -301,7 +313,7 @@ def get_seams(img1, img2, H, seam_size):
     print(time.time() - startTime)
     result = img1
     result[0:img2.shape[0], 0:img2.shape[1]] = img2
-    result[int(pos_top[1]):int(pos_bot[1]), int(top_right[0]) - seam_size:int(img2.shape[1])] = seam_join
+    result[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])] = seam_join
     #cv2.imshow("dst",img1)
     #cv2.waitKey(0)
     return result
@@ -316,7 +328,7 @@ def cpuStitch(frames, H, shapes):
     startTime = time.time()
     dst = cv2.warpPerspective(img1, H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
     warpTime = time.time() - startTime
-    result = get_seams(dst, img2, H, 300)
+    result = get_seams(dst, img2, H, 50)
 
     shape = img2.shape[0] - 1, img2.shape[1] - 1
     # cv2.imwrite("Dst.jpg", dst[0:img2.shape[0],0:img2.shape[1]])
@@ -897,10 +909,20 @@ def computeBlendingMatrix(left_img):
     factors_right = np.zeros(left_img.shape)
     for i in range(0, columns):
         for j in range(0, rows):
+            factor = 1
+            #if j <= rows/2:
+            #    factor = ((columns -i)/columns + (rows - j)/rows)/2
             # factor = ((columns -i)/columns + (rows - j)/rows)/2
+            #elif j >= rows/2:
+            #    factor =((columns -i)/columns +  (1- (rows - j)/rows))/2
+
+            #else:
             factor = (columns - i) / columns
             factors_left[j][i] = (factor, factor, factor)
             factors_right[j][i] = (1 - factor, 1 - factor, 1 - factor)
+    #cv2.imshow("factors_left", factors_left)
+    #cv2.imshow("factors_right", factors_right)
+    #cv2.waitKey(0)
     return factors_left, factors_right
 
 def edgeWeightedBlending(left_img, right_img,factors_left, factors_right):
