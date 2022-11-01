@@ -1,13 +1,45 @@
 import math
+import os
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pprint import pprint
 
 import cv2
 import numpy as np
 from matplotlib import pyplot as plt
 
+#PriorityQueue adapted from https://www.geeksforgeeks.org/priority-queue-in-python/
+class PriorityQueue(object):
+    def __init__(self):
+        self.queue = []
 
+    def __str__(self):
+        return ' '.join([str(i) for i in self.queue])
+
+    # for checking if the queue is empty
+    def isEmpty(self):
+        return len(self.queue) == 0
+
+    # for inserting an element in the queue
+    def insert(self, data):
+        max_val = -1
+        if len(self.queue) < 1:
+            self.queue.append(data)
+            return
+        for i in range(len(self.queue)):
+            if self.queue[i][0] > data[0]:
+                self.queue.insert(i, data)
+                return
+        self.queue.append(data)
+
+    # for popping an element based on Priority
+    def pop(self):
+        return self.queue.pop(0)
+    def deleted(self, index):
+        return self.queue.pop(index)
+    def peek(self):
+        return self.queue[0]
 def findInitialHomography():
     pass
 
@@ -241,10 +273,10 @@ def seamEstimation(img1, img2):
         # result2 = img1[:,curr_x:curr_x+column_width].sum() -img2[:,curr_x:curr_x+column_width].sum()
         # result = np.mean()
         sums.append(result)
-        print(result)
+        #print(result)
 
         curr_x += column_width
-    print(sums)
+    #print(sums)
     # cv2.imshow("result",result)
     # cv2.waitKey(0)
 
@@ -268,11 +300,11 @@ def blendWeightedCustom(img1, img2, alpha, beta, gamma):
 
 def calc_sloped_coord(coor_0, coor_1, x_value):
     slope = (coor_0[1] - coor_1[1]) / (coor_0[0] - coor_1[0])
-    y_value = slope * (x_value-coor_1[0] ) + coor_1[1]
+    y_value = slope * (x_value - coor_1[0]) + coor_1[1]
     return x_value, y_value
 
 
-def get_seams(img1, img2, H, seam_size):
+def calc_sloped_coords(img2, H):
     h, w, c = img2.shape
     pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
     corners = cv2.perspectiveTransform(pts, H)
@@ -282,94 +314,74 @@ def get_seams(img1, img2, H, seam_size):
     top_left = corners[0][0]
     top_right = corners[3][0]
 
-
     pos_top = calc_sloped_coord(top_left, top_right, w)
     pos_bot = calc_sloped_coord(bottom_left, bottom_right, w)
-    seam_1 = img1[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])]
-    seam_2 = img2[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])]
-    pos = (int(top_right[0]) - seam_size, top_right[1])
-    # cv2.imshow("seam1", seam_1)
-    # cv2.imshow("seam2", seam_2)
+    return pos_bot, pos_top
 
-    # cv2.waitKey(0)
-    factors_left, factors_right =computeBlendingMatrix(seam_1)
+
+def get_seams(img1, img2, seam_size, factors, bounds):
+    pos_bot, pos_top = bounds
+    factors_left, factors_right = factors
 
     startTime = time.time()
 
-    pos_top = calc_sloped_coord(top_left, top_right, w)
-    pos_bot = calc_sloped_coord(bottom_left, bottom_right, w)
     seam_1 = img1[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])]
     seam_2 = img2[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])]
-    pos = (int(top_right[0]) - seam_size, top_right[1])
-    # cv2.imshow("seam1", seam_1)
-    # cv2.imshow("seam2", seam_2)
+    seam_join = edgeWeightedBlending(seam_2, seam_1, factors_left, factors_right)
 
+    #print(time.time() - startTime)
+    result = img1
+    result[0:img2.shape[0], 0:img2.shape[1]] = img2
+    result[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])] = seam_join
+    # cv2.imshow("dst",img1)
     # cv2.waitKey(0)
-    #factors_left, factors_right =computeBlendingMatrix(seam_1)
-    #cv2.imshow("seam1", seam_1)
-    #cv2.imshow("factors_left",factors_left)
-    #cv2.waitKey(0)
-    seam_join = edgeWeightedBlending(seam_2, seam_1,factors_left, factors_right)
+    return result
+
+
+def get_seams_parallel(img1, img2, seam_size, factors, bounds,priorityList):
+    pos_bot, pos_top = bounds
+    factors_left, factors_right = factors
+
+    startTime = time.time()
+
+    seam_1 = img1[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])]
+    seam_2 = img2[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])]
+    seam_join = edgeWeightedBlending(seam_2, seam_1, factors_left, factors_right)
+
     print(time.time() - startTime)
     result = img1
     result[0:img2.shape[0], 0:img2.shape[1]] = img2
     result[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])] = seam_join
-    #cv2.imshow("dst",img1)
-    #cv2.waitKey(0)
+    # cv2.imshow("dst",img1)
+    # cv2.waitKey(0)
     return result
 
 # return result
 # return (int(x_min), int(y_min), int(x_max), int(y_max))
-def cpuStitch(frames, H, shapes):
+def cpuStitch(frames, H, shapes, seam_size, factors, bounds):
     img1 = frames[1]
     img2 = frames[0]
-    seam_pts = get_overlap_corners(H, img1, img2, shapes)
-    shift = 0
+    # seam_pts = get_overlap_corners(H, img1, img2, shapes)
     startTime = time.time()
     dst = cv2.warpPerspective(img1, H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
     warpTime = time.time() - startTime
-    result = get_seams(dst, img2, H, 50)
+    result = get_seams(dst, img2, seam_size, factors, bounds)
 
-    shape = img2.shape[0] - 1, img2.shape[1] - 1
-    # cv2.imwrite("Dst.jpg", dst[0:img2.shape[0],0:img2.shape[1]])
-    # cv2.imwrite("img2.jpg", img2)
-    # seam_dst = dst[seam_pts[1]:seam_pts[3],img2.shape[1]-10:img2.shape[1]]
-    # seam_img2 = img2[seam_pts[1]:seam_pts[3],img2.shape[1]-10:img2.shape[1]]
-    overlap_dst = dst[seam_pts[1] - 20:seam_pts[3], seam_pts[0]:img2.shape[1]]
-    overlap_2 = img2[seam_pts[1] - 20:seam_pts[3], seam_pts[0]:img2.shape[1]]
-    startTime = time.time()
-
-    # seamEstimation(overlap_dst,overlap_2)
-    alpha = 0.2
-
-    beta = 1 - alpha
-    gamma = 0.0
-    # seam_join = edgeWeightedBlending(seam_img2,seam_dst)
-    #seam_join = edgeWeightedBlending(overlap_2, overlap_dst)
-    blendTime = time.time() - startTime
-    # seam_join = blendWeightedCustom(dst,img2,alpha,beta,gamma)
-    # seam_join = cv2.addWeighted(seam_dst, alpha, seam_img2, beta, gamma)
-    # cv2.imshow("Seam", seam_join)
-    # cv2.imshow("dst", seam_img2)
-
-    # cv2.waitKey(0)
-    #startTime = time.time()
-    #dst[0:img2.shape[0], 0 + shift:img2.shape[1] + shift] = img2
-    #dst[seam_pts[1] - 20:seam_pts[3], seam_pts[0]:img2.shape[1]] = seam_join
-    join_time = time.time() - startTime
-    # cv2.imshow("right", dst)
-    # cv2.waitKey(0)
-    # print(str(warpTime) + "," +str(blendTime) + "," + str(join_time))
     return result
-    # cv2.imshow("img2",img2)
 
-    # cv2.imshow("dst",dst)
-    # cv2.waitKey(0)
+def cpuStitchParallel(frames, H, shapes, seam_size, factors, bounds, priority_list):
+    img1 = frames[1]
+    img2 = frames[0]
+    # seam_pts = get_overlap_corners(H, img1, img2, shapes)
+    dst = cv2.warpPerspective(img1, H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
+    result = get_seams(dst, img2, seam_size, factors, bounds)
+
+    return result
 
 
-def fixHMatrixStitch(frames, H, shapes, sub_arr, inv_arr, inv_arr_mask, inv_arr_2):
+def fixHMatrixStitch(frames, H, shapes, seam_size, factors, bounds):
     # startTime = time.time()
-    dst = cpuStitch(frames, H, shapes)
+    dst = cpuStitch(frames, H, shapes, seam_size, factors, bounds)
     # dst = getOverlapRegionMultBased(frames, H, shapes, sub_arr, inv_arr, inv_arr_2)
     # dst = getOverlapRegionCornerBased(frames[1], frames[0], shapes, H, sub_arr, inv_arr, inv_arr_mask)
     # dst = getOverlapRegionCudaBased(frames, H, shapes, sub_arr, inv_arr, inv_arr_2)
@@ -665,7 +677,8 @@ def getHMatrixRegions(frames, shapes):
         src_pts = np.float32(src_pts).reshape(-1, 1, 2)
         dst_pts = np.float32(dst_pts).reshape(-1, 1, 2)
 
-        print(filter_count)
+        #
+        #print(filter_count)
         # src_pts = np.float32([best_region_1[0][m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
         # dst_pts = np.float32([best_region_2[0][m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
         H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 3.0)
@@ -798,7 +811,7 @@ def stitchImagesRandomized(alpha, img_1, img_2):
         if len(kp1) < 4 or len(kp2) < 4:
             break
         matches = bf.knnMatch(des1, des2, k=2)
-        print(len(matches))
+       # print(len(matches))
         match_time = startTime = time.time()
 
         # Apply ratio test
@@ -898,268 +911,184 @@ def edgeWeightedBlendingColumnsOnly(left_img, right_img):
     except():
         print("Matrices are not the same shape")
 
-def computeBlendingMatrix(left_img):
+
+def computeBlendingMatrix(img_shape):
     row_blend_span = 10
 
-    result = left_img
+    # result = left_img
     edge_blend_window = 200
-    columns = left_img.shape[1]
-    rows = left_img.shape[0]
-    factors_left = np.zeros(left_img.shape)
-    factors_right = np.zeros(left_img.shape)
+    columns = img_shape[1]
+    rows = img_shape[0]
+    factors_left = np.zeros(img_shape)
+    factors_right = np.zeros(img_shape)
     for i in range(0, columns):
         for j in range(0, rows):
             factor = 1
-            #if j <= rows/2:
+            # if j <= rows/2:
             #    factor = ((columns -i)/columns + (rows - j)/rows)/2
             # factor = ((columns -i)/columns + (rows - j)/rows)/2
-            #elif j >= rows/2:
+            # elif j >= rows/2:
             #    factor =((columns -i)/columns +  (1- (rows - j)/rows))/2
 
-            #else:
+            # else:
             factor = (columns - i) / columns
             factors_left[j][i] = (factor, factor, factor)
             factors_right[j][i] = (1 - factor, 1 - factor, 1 - factor)
-    #cv2.imshow("factors_left", factors_left)
-    #cv2.imshow("factors_right", factors_right)
-    #cv2.waitKey(0)
+
     return factors_left, factors_right
 
-def edgeWeightedBlending(left_img, right_img,factors_left, factors_right):
+
+def computeBlendingMatrixBidirectional(img_shape):
+    row_blend_span = 10
+
+    # result = left_img
+    edge_blend_window = 200
+    columns = img_shape[1]
+    rows = img_shape[0]
+    factors_left = np.zeros(img_shape)
+    factors_right = np.zeros(img_shape)
+    for i in range(0, columns):
+        for j in range(0, rows):
+            factor = 1
+            if j <= rows/2:
+                factor = ((columns -i)/columns + (rows - j)/rows)/2
+            elif j >= rows/2:
+                factor =((columns -i)/columns +  (1- (rows - j)/rows))/2
+
+            else:
+                factor = (columns - i) / columns
+            factors_left[j][i] = (factor, factor, factor)
+            factors_right[j][i] = (1 - factor, 1 - factor, 1 - factor)
+
+    return factors_left, factors_right
+
+
+def edgeWeightedBlending(left_img, right_img, factors_left, factors_right):
     try:
         if left_img.shape != left_img.shape:
             raise
         # We need to weigh the blending by how close the pixel is to each edge
         # If close to the left side, we weigh more heavily in favor of the left image, and the same logic for the right
         # For now, we can just treat it as if there are only left and right sides, top and bottom can be done later
-
-            #result[:, i] = left_img[:, i] * factor + right_img[:, i] * (1 - factor)
         result = left_img * factors_left + right_img * factors_right
-        #cv2.imshow(result, "result")
-        #cv2.waitKey(0)
-        #for j in range(0,rows):
-        #    factor = (rows - j) / rows
-        #    if j >= int(rows/2):
 
-        #        result[j, :] = result[j, :] * (1-factor) + right_img[j, :] * (factor)
-        #    else:
-        #        result[j, :] = result[j, :] * (factor) + right_img[j, :] * (1-factor)
-
-        # cv2.imshow("left", left_img)
         return result
     except():
         print("Matrices are not the same shape")
 
+def preprocessing(frames_og,shapes, seam_size):
+    H = getHMatrixRegions(frames_og, shapes)
+    bounds = calc_sloped_coords(frames_og[0], H)
+    pos_bot, pos_top = bounds
+    dst = cv2.warpPerspective(frames_og[1], H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
+    seam_1 = dst[int(pos_top[1]):int(pos_bot[1]), int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
+    factors = computeBlendingMatrixBidirectional(seam_1.shape)
+    init_stitch = cpuStitch(frames_og, H, shapes, seam_size, factors, bounds)
+    cv2.imwrite("Init_stitch_sub.jpg", init_stitch)
+    #joined2 = cv2.hconcat(frames)
+    #cv2.imwrite("joined_cameras.jpg", joined2)
+    cv2.imwrite("init_stitch.jpg", init_stitch)
+    return H, bounds, factors
+def perspectiveWarp(frames,shapes,H,seam_size,factors,bounds,priorityList):
+    dst = cv2.warpPerspective(frames[1], H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
+    #result = get_seams(dst, frames[0], seam_size, factors, bounds)
+    return dst
+    #priorityList[2].insert(0,(get_seams_parallel,(dst, frames[0], seam_size, factors, bounds,priorityList)))
+def performWarpBlendStitch(frames_og, shapes, H, seam_size,factors,bounds,count,buffer):
+    startTime = time.time()
+    #dst = cv2.warpPerspective(frames_og[1], H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
+    result = cpuStitch(frames_og, H, shapes, seam_size, factors, bounds)
+    performWarpBlendStitchTime= str(time.time() - startTime)
+    #print(performWarpBlendStitchTime)
+    buffer.insert((count, cv2.resize(result, (1280, 720))))
+    #return cv2.resize(result, (1280, 720))
+def checkBuffer(buffer, next_tag, out_1):
+    timeout = 0
+    while timeout < 100:
+        if not buffer.isEmpty():
+            timeout = 0
 
-
+            if buffer.peek()[0] == next_tag:
+                out_1.write(buffer.pop()[1])
+                #print(buffer)
+                print(next_tag)
+                next_tag+=1
+        else:
+            time.sleep(0.01)
+            timeout+=1
 def stitchVideos(videos, fps):
-    frame_skip = 800
-    # frame_skip_cams = [2,0,0]
-    sub_arr = None
-    inv_arr = None
-    inv_arr_mask = None
-    fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
-    stitcher_time = ""
-    fixed_H_time = ""
-    hmatrixtime = ""
-    # out_0 = cv2.VideoWriter("output_stitcher.mp4", fourcc, 10.0, (1280, 720))
-    out_1 = cv2.VideoWriter("output_regional_h.mp4", fourcc, 10.0, (1280, 720))
-    # uMatTest = cv2.UMat(720,1280,cv2.CV_8UC3)
-    H = None
-    caps = []
-    for video in videos:
-        caps.append((cv2.VideoCapture(video)))
-    # cap1 = cv2.VideoCapture(video1)
-    # cap2 = cv2.VideoCapture(video2)
-    # cap3 = cv2.VideoCapture(video3)
-    # for i in range(len(frame_skip_cams)):
-    #    for j in range(0,frame_skip_cams[i]):
-    #        caps[j].read()
-    count = 0
-    cams_up = True
-    #    print(str(warpTime) + "," +str(blendTime) + "," + str(join_time))
+    print(os.cpu_count())
 
-    # print("warpTime","startTime,joinTime")
-    # print("videoReadTime")
-    while cams_up:
-        frames = []
-        shapes = []
-        frames_og = []
-        for cap in caps:
-            startTime = time.time()
-            ret, uMatTest = cap.read()
-            # print(time.time() - startTime)
-            shapes.append(uMatTest.shape)
-            # if frame collection fails
-            if not ret:
-                cams_up = False
-                break
-            frames.append(cv2.UMat(uMatTest))
-            frames_og.append(uMatTest)
-            # frames.append(uMatTest)
-        # frames.append(cv2.UMat(cv2.cvtColor(uMatTest,cv2.COLOR_BGRGRAY))
+    for i in range(20):
+        frame_skip = 800
+        fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
+        stitcher_time = ""
+        fixed_H_time = ""
+        hmatrixtime = ""
+        seam_size = 50
+        factors = []
+        bounds = []
+        out_1 = cv2.VideoWriter("output_regional_h.mp4", fourcc, 10.0, (1280, 720))
+        H = None
+        caps = []
+        for video in videos:
+            caps.append((cv2.VideoCapture(video)))
+        count = 0
+        cams_up = True
+        buffer = PriorityQueue()
+        priorityList = []
+        next_tag =0
+        startTime2 = time.time()
 
-        # ret2, frame2 = cap2.read()
-        # ret3, frame3 = cap3.read()
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            startTime2 = time.time()
 
-        if count <= frame_skip:
-            count += 1
-            # print(count)
-            continue
+            while cams_up:
+                frames = []
+                shapes = []
+                frames_og = []
+                for cap in caps:
+                    ret, frame = cap.read()
+                    if not ret:
+                        cams_up = False
+                        #print("end of video stream")
+                        break
+                    shapes.append(frame.shape)
+                    frames_og.append(frame)
+                if count <= frame_skip:
+                    count += 1
 
-        # count +=1
-        if H is None:
-            startTime = time.time()
-            # H = getHMatrix(frames)
-            H = getHMatrixRegions(frames_og, shapes)
-            # print("=====================\nTime: " + str(time.time() - startTime))
-            sub_arr, inv_arr, inv_arr_mask, inv_arr_2 = generate_masks(H, frames[1], frames[2], shapes)
-            init_stitch = fixHMatrixStitch(frames_og, H, shapes, sub_arr, inv_arr, inv_arr_mask, inv_arr_2)
-            cv2.imwrite("Init_stitch_sub.jpg", init_stitch)
-            joined2 = cv2.hconcat(frames)
-            cv2.imwrite("joined_cameras.jpg", joined2)
-        count += 1
-        # startTime = time.time()
+                    next_tag = count
+                    # print(count)
+                    continue
 
-        # try:
-        #    joined = stitcher.stitch([frames[0], frames[1]])
-        # except cv2.error:
-        #    print("boop")
-        # stitcher_time += str(time.time() - startTime) + "\n"
+                if H is None:
+                    #place this at the end of the highest priority list, since it should always be run asap when needed
+                    #priorityList[0].append((preprocessing,[frames_og,shapes, seam_size]))
+                    #H, bounds, factors = preprocessing(frames_og,shapes, seam_size)
 
-        # result = stitchImagesRandomized(0.5,frames[1], frames[2])
-        # cv2.imshow("half",result[1])
-        startTime = time.time()
-        # openCVStitchImplentation(frames)
-        fixed_h_result = fixHMatrixStitch(frames_og, H, shapes, sub_arr, inv_arr, inv_arr_mask, inv_arr_2)
-        fixed_H_time += str(time.time() - startTime) + "\n"
-        # if(joined[1] is not None):
-        #    joined_out = cv2.resize(joined[1], (1280,720))
-        #    out_0.write(joined_out)
-        startTime = time.time()
-        # H = getHMatrixRegions(frames)
-        # hmatrixtime += str(time.time() - startTime) + "\n"
-        # gen_image = fixHMatrixStitch(frames,H)
-        # cv2.imwrite("frames_new\\image_" + str(count)+".jpg", fixed_h_result)
-        fixed_h_result = cv2.resize(fixed_h_result, (1280, 720))
-        out_1.write(fixed_h_result)
-        # cv2.namedWindow("joined_cameras", cv2.WINDOW_NORMAL)
-        # cv2.namedWindow("joined2", cv2.WINDOW_NORMAL)
-        # cv2.imwrite("Cameraas_side_by_side.jpg", joined2)
-        # cv2.imwrite("local_class_frame_1_2.jpg", joined)
-        # cv2.imshow("joined_cameras", joined)
-        # print(joined)
-        # cv2.imshow("joined",joined[1])
+                   # H, bounds, factors=preprocessing(frames_og,shapes, seam_size)
+                    H, bounds, factors = preprocessing(frames_og,shapes, seam_size)
+                    buffer_runner = executor.submit(checkBuffer, *[buffer, next_tag, out_1])
 
-        # cv2.imshow("joined2",result[1])
-        # cv2.waitKey(0)
-        if count > frame_skip + 1000:
-            break
-    with open('stitcher_times.csv', 'w') as outfile:
-        outfile.write(stitcher_time)
-    with open('fixed_h_times.csv', 'w') as outfile:
-        outfile.write(fixed_H_time)
-    # with open('h_matrix_gen_time.csv', 'w') as outfile:
-    #    outfile.write(hmatrixtime)
+                #if SVM return false
+                #spawn a preprocesing thread
 
-
-def stitchVideosGPU(videos, fps):
-    frame_skip = 800
-    # frame_skip_cams = [2,0,0]
-
-    fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
-    stitcher_time = ""
-    fixed_H_time = ""
-    hmatrixtime = ""
-    # out_0 = cv2.VideoWriter("output_stitcher.mp4", fourcc, 10.0, (1280, 720))
-    out_1 = cv2.VideoWriter("output_regional_h.mp4", fourcc, 10.0, (1280, 720))
-
-    H = None
-    stitcher = cv2.Stitcher_create(cv2.STITCHER_PANORAMA)
-    caps = []
-    for video in videos:
-        caps.append((cv2.VideoCapture(video)))
-
-    count = 0
-    cams_up = True
-    while cams_up:
-        frames = []
-        GPU_frames = []
-        for cap in caps:
-            holder = cap.read()
-            # if frame collection fails
-            if not holder[0]:
-                cams_up = False
-                break
-            test = cv2.cuda_GpuMat()
-            test.upload(holder[1])
-            GPU_frames.append(test)
-            frames.append(holder[1])
-
-        # ret2, frame2 = cap2.read()
-        # ret3, frame3 = cap3.read()
-
-        if count <= frame_skip:
-            count += 1
-            # print(count)
-            continue
-
-        # count +=1
-        if H is None:
-            startTime = time.time()
-            # H = getHMatrix(frames)
-            H = getHMatrixRegions(frames)
-            print("=====================\nTime: " + str(time.time() - startTime))
-
-            init_stitch = fixHMatrixStitch(frames, GPU_frames, H)
-            cv2.imwrite("Init_stitch_sub.jpg", init_stitch)
-            joined2 = np.concatenate(frames, axis=1)
-            cv2.imwrite("joined_cameras.jpg", joined2)
-        count += 1
-        # startTime = time.time()
-
-        # try:
-        #    joined = stitcher.stitch([frames[0], frames[1]])
-        # except cv2.error:
-        #    print("boop")
-        # stitcher_time += str(time.time() - startTime) + "\n"
-
-        # result = stitchImagesRandomized(0.5,frames[1], frames[2])
-        # cv2.imshow("half",result[1])
-        startTime = time.time()
-        # openCVStitchImplentation(frames)
-        fixed_h_result = fixHMatrixStitch(frames, GPU_frames, H)
-
-        fixed_H_time += str(time.time() - startTime) + "\n"
-        # if(joined[1] is not None):
-        #    joined_out = cv2.resize(joined[1], (1280,720))
-        #    out_0.write(joined_out)
-        startTime = time.time()
-        # H = getHMatrixRegions(frames)
-        # hmatrixtime += str(time.time() - startTime) + "\n"
-        # gen_image = fixHMatrixStitch(frames,H)
-        # cv2.imwrite("frames_new\\image_" + str(count)+".jpg", fixed_h_result)
-        fixed_h_result = cv2.resize(fixed_h_result, (1280, 720))
-        out_1.write(fixed_h_result)
-        # cv2.namedWindow("joined_cameras", cv2.WINDOW_NORMAL)
-        # cv2.namedWindow("joined2", cv2.WINDOW_NORMAL)
-        # cv2.imwrite("Cameraas_side_by_side.jpg", joined2)
-        # cv2.imwrite("local_class_frame_1_2.jpg", joined)
-        # cv2.imshow("joined_cameras", joined)
-        # print(joined)
-        # cv2.imshow("joined",joined[1])
-
-        # cv2.imshow("joined2",result[1])
-        # cv2.waitKey(0)
-        if count > frame_skip + 1000:
-            break
-    with open('stitcher_times.csv', 'w') as outfile:
-        outfile.write(stitcher_time)
-    with open('fixed_h_times.csv', 'w') as outfile:
-        outfile.write(fixed_H_time)
-    # with open('h_matrix_gen_time.csv', 'w') as outfile:
-    #    outfile.write(hmatrixtime)
-
+                startTime = time.time()
+                executor.submit(performWarpBlendStitch,*[frames_og, shapes, H, seam_size,factors,bounds,count,buffer])
+                #fixed_h_result = performWarpBlendStitch(frames_og, shapes, H, seam_size,factors,bounds,count,buffer)
+                #out_1.write(fixed_h_result)
+                count+=1
+                #if count > frame_skip + 10000:
+                #    break
+        buffer_runner.result()
+        print(time.time()-startTime2)
+        with open('stitcher_times.csv', 'w') as outfile:
+            outfile.write(stitcher_time)
+        with open('fixed_h_times.csv', 'w') as outfile:
+            outfile.write(fixed_H_time)
+        # with open('h_matrix_gen_time.csv', 'w') as outfile:
+        #    outfile.write(hmatrixtime)
 
 def main():
     stitchVideos(
