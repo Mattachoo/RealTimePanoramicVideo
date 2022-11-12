@@ -4,12 +4,14 @@ import random
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pprint import pprint
-
+from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
+import ImageValidator
 import cv2
 import numpy as np
 from matplotlib import pyplot as plt
 
-#PriorityQueue adapted from https://www.geeksforgeeks.org/priority-queue-in-python/
+
+# PriorityQueue adapted from https://www.geeksforgeeks.org/priority-queue-in-python/
 class PriorityQueue(object):
     def __init__(self):
         self.queue = []
@@ -36,10 +38,14 @@ class PriorityQueue(object):
     # for popping an element based on Priority
     def pop(self):
         return self.queue.pop(0)
+
     def deleted(self, index):
         return self.queue.pop(index)
+
     def peek(self):
         return self.queue[0]
+
+
 def findInitialHomography():
     pass
 
@@ -273,10 +279,10 @@ def seamEstimation(img1, img2):
         # result2 = img1[:,curr_x:curr_x+column_width].sum() -img2[:,curr_x:curr_x+column_width].sum()
         # result = np.mean()
         sums.append(result)
-        #print(result)
+        # print(result)
 
         curr_x += column_width
-    #print(sums)
+    # print(sums)
     # cv2.imshow("result",result)
     # cv2.waitKey(0)
 
@@ -329,7 +335,7 @@ def get_seams(img1, img2, seam_size, factors, bounds):
     seam_2 = img2[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])]
     seam_join = edgeWeightedBlending(seam_2, seam_1, factors_left, factors_right)
 
-    #print(time.time() - startTime)
+    # print(time.time() - startTime)
     result = img1
     result[0:img2.shape[0], 0:img2.shape[1]] = img2
     result[int(pos_top[1]):int(pos_bot[1]), int(img2.shape[1]) - seam_size:int(img2.shape[1])] = seam_join
@@ -338,7 +344,7 @@ def get_seams(img1, img2, seam_size, factors, bounds):
     return result
 
 
-def get_seams_parallel(img1, img2, seam_size, factors, bounds,priorityList):
+def get_seams_parallel(img1, img2, seam_size, factors, bounds, priorityList):
     pos_bot, pos_top = bounds
     factors_left, factors_right = factors
 
@@ -356,6 +362,7 @@ def get_seams_parallel(img1, img2, seam_size, factors, bounds,priorityList):
     # cv2.waitKey(0)
     return result
 
+
 # return result
 # return (int(x_min), int(y_min), int(x_max), int(y_max))
 def cpuStitch(frames, H, shapes, seam_size, factors, bounds):
@@ -368,6 +375,7 @@ def cpuStitch(frames, H, shapes, seam_size, factors, bounds):
     result = get_seams(dst, img2, seam_size, factors, bounds)
 
     return result
+
 
 def cpuStitchParallel(frames, H, shapes, seam_size, factors, bounds, priority_list):
     img1 = frames[1]
@@ -533,174 +541,6 @@ def verticalSlices(shapes, regions_boundries_1):
         regions_boundries_1.append((point_0, shapes[0][0], 0, shapes[0][0]))
 
 
-def getHMatrixRegions(frames, shapes):
-    H = None
-    MIN_MATCH_COUNT = 10
-
-    # Initiate SIFT detector
-    sift = cv2.SIFT_create()
-    # find the keypoints and descriptors with SIFT
-    # temporary for testing, set frames to first 2 frames in the input array
-    # this should be changed later to fully support long arrays of frames
-    img1 = cv2.cvtColor(frames[1], cv2.COLOR_BGR2GRAY)
-    img2 = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
-    kp1, des1 = sift.detectAndCompute(img1, None)
-    kp2, des2 = sift.detectAndCompute(img2, None)
-    mid_x = int(img1.shape[1] / 2)
-    mid_y = int(img1.shape[0] / 2)
-
-    regions_boundries_1 = []
-    # regions_boundries_2 = []
-    # Below are keypoints for 4 segments
-    # regions_boundries_1 = [((0, mid_x), (0, mid_y)), ((mid_x, img1.shape[1]), (0, mid_y)),
-    #                       ((0, mid_x), (mid_y, img1.shape[0])), ((mid_x, img1.shape[1]), (mid_y, img1.shape[0]))]
-    # regions_boundries_2 = [((0, mid_x), (0, mid_y)), ((mid_x, img2.shape[1]), (0, mid_y)),
-    #                       ((0, mid_x), (mid_y, img2.shape[0])), ((mid_x, img2.shape[1]), (mid_y, img2.shape[0]))]
-    # boundary5 = (int(mid_x / 2), int(mid_x + mid_x / 2), int(mid_y / 2), int(mid_y + mid_y / 2))
-    # regions_boundries_1 = [(0, mid_x, 0, mid_y), (mid_x, img1.shape[1], 0, mid_y),
-    #                      (0, mid_x, mid_y, img1.shape[0]), (mid_x, img1.shape[1], mid_y, img1.shape[0]), boundary5]
-    # regions_boundries_2 = [(0, mid_x, 0, mid_y), (mid_x, img2.shape[1], 0, mid_y), (0, mid_x, mid_y, img2.shape[0]),
-    #                       (mid_x, img2.shape[1], mid_y, img2.shape[0]), boundary5]
-
-    # Try slices instead
-    point_0 = 0
-    point_1 = img1.shape[0] / 4
-    step = (img1.shape[0] / 3) / 2
-    # horitzontal slices
-    while (point_1 <= img1.shape[0]):
-        regions_boundries_1.append((0, img1.shape[1], point_0, point_1))
-        # temp_step = step
-        point_0 += step
-        point_1 += step
-    if (point_1 < img1.shape[0]):
-        regions_boundries_1.append((0, img1.shape[1], point_0, img1.shape[0]))
-    # vertical slices
-    # point_0 = 0
-    # point_1 = img1.shape[0] / 5
-    # step = (img1.shape[0] / 5) / 2
-
-    # while (point_1 <= img1.shape[0]):
-    #    regions_boundries_1.append((point_0, point_1, 0, img1.shape[0]))
-    #    # temp_step = step
-    #    point_0 += step
-    #    point_1 += step
-    # if (point_1 < img1.shape[0]):
-    #    regions_boundries_1.append((point_0, img1.shape[0], 0, img1.shape[0]))
-    regions_1 = partitionKeypoints2(img1, kp1, des1, regions_boundries_1)
-    regions_1 = cutSmallestRegions(regions_1)
-    # print(len(regions_1[0]))
-
-    regions_2 = partitionKeypoints2(img2, kp2, des2, regions_boundries_1)
-    regions_2 = cutSmallestRegions(regions_2)
-
-    best_region = []
-    FLANN_INDEX_KDTREE = 1
-    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-    search_params = dict(checks=50)
-    flann = cv2.BFMatcher()
-    count_1 = 0
-    count_2 = 0
-
-    # reg_des_1 =np.array(reg_des_1)
-    # reg_des_2 =np.array(reg_des_2)
-
-    # region_1[1] = np.array(region_1[1])
-    region_index_1 = 0
-    region_index_2 = 0
-    best_1 = -1
-    best_2 = -1
-    i = 0
-    j = 0
-    for region_1 in regions_1[1]:
-        region_index_2 = 0
-
-        j = 0
-        test1 = np.array(region_1)
-        for region_2 in regions_2[1]:
-            j += 1
-            test2 = np.array(region_2)
-            if (region_index_1 != region_index_2):
-                # region_2[1] = np.array(region_2[1])
-
-                # print(type(des1[0]))
-                # print(type(region_1[1][1]))
-                # print(str(i) + " : " + str(j))
-                matches = flann.knnMatch(test1, test2, k=2)
-                # store all the good matches as per Lowe's ratio test.
-                good = []
-                H = None
-                for m, n in matches:
-                    if m.distance < 0.6 * n.distance:
-                        good.append(m)
-                if len(good) > len(best_region):
-                    best_region = good
-                    best_1 = region_index_1
-                    best_2 = region_index_2
-            region_index_2 += 1
-        i += 1
-        region_index_1 += 1
-    good = best_region
-
-    best_region_1 = [regions_1[0][best_1], regions_1[1][best_1]]
-
-    best_region_2 = [regions_2[0][best_2], regions_2[1][best_2]]
-
-    if len(good) > MIN_MATCH_COUNT:
-        src_pts = []
-        dst_pts = []
-        avg_x_change = 0
-        avg_y_change = 0
-        for m in good:
-            src_pt = best_region_1[0][m.queryIdx].pt
-            dst_pt = best_region_2[0][m.trainIdx].pt
-            # src_pts.append(src_pt)
-            # dst_pts.append(dst_pt)
-            avg_x_change += abs(src_pt[0] - dst_pt[0])
-            avg_y_change += abs(src_pt[1] - dst_pt[1])
-        avg_x_change = avg_x_change / len(good)
-        avg_y_change = avg_y_change / len(good)
-
-        deviation = 10
-        filter_count = 0
-        for m in good:
-            src_pt = best_region_1[0][m.queryIdx].pt
-            dst_pt = best_region_2[0][m.trainIdx].pt
-            x_change = abs(src_pt[0] - dst_pt[0])
-            y_change = abs(src_pt[1] - dst_pt[1])
-            if avg_y_change + deviation >= y_change >= avg_y_change - deviation:
-                if avg_x_change + deviation >= x_change >= avg_x_change - deviation:
-                    src_pts.append(src_pt)
-                    dst_pts.append(dst_pt)
-                    pass
-            else:
-                pass
-        src_pts = np.float32(src_pts).reshape(-1, 1, 2)
-        dst_pts = np.float32(dst_pts).reshape(-1, 1, 2)
-
-        #
-        #print(filter_count)
-        # src_pts = np.float32([best_region_1[0][m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
-        # dst_pts = np.float32([best_region_2[0][m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
-        H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 3.0)
-        img3 = cv2.drawMatches(img1, best_region_1[0], img2, best_region_2[0], good, None,
-                               flags=cv2.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS)
-        cv2.imwrite("Matching_keypoints.jpg", img3)
-        # H = cv2.getPerspectiveTransform(src_pts, dst_pts)
-        matchesMask = mask.ravel().tolist()
-        # h, w, c = img2.shape
-        # pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
-        # dst = cv2.perspectiveTransform(pts, M)
-        # dst are the corners of the left image on the right image.
-
-        # img2 = cv2.polylines(img2, [np.int32(dst)], True, 255, 3, cv2.LINE_AA)
-        # cv2.imshow("Test", img2)
-        # cv2.waitKey(0)
-    else:
-        print("Not enough matches are found - {}/{}".format(len(good), MIN_MATCH_COUNT))
-        matchesMask = None
-        return None
-    return H
-
 
 def getHMatrix(frames):
     H = None
@@ -733,16 +573,8 @@ def getHMatrix(frames):
         H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 3.0)
         img3 = cv2.drawMatches(img1, kp1, img2, kp2, good, None, flags=cv2.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS)
         cv2.imwrite("Matching_keypoints.jpg", img3)
-        # H = cv2.getPerspectiveTransform(src_pts, dst_pts)
         matchesMask = mask.ravel().tolist()
-        # h, w, c = img2.shape
-        # pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
-        # dst = cv2.perspectiveTransform(pts, M)
-        # dst are the corners of the left image on the right image.
 
-        # img2 = cv2.polylines(img2, [np.int32(dst)], True, 255, 3, cv2.LINE_AA)
-        # cv2.imshow("Test", img2)
-        # cv2.waitKey(0)
     else:
         print("Not enough matches are found - {}/{}".format(len(good), MIN_MATCH_COUNT))
         matchesMask = None
@@ -811,7 +643,7 @@ def stitchImagesRandomized(alpha, img_1, img_2):
         if len(kp1) < 4 or len(kp2) < 4:
             break
         matches = bf.knnMatch(des1, des2, k=2)
-       # print(len(matches))
+        # print(len(matches))
         match_time = startTime = time.time()
 
         # Apply ratio test
@@ -950,10 +782,10 @@ def computeBlendingMatrixBidirectional(img_shape):
     for i in range(0, columns):
         for j in range(0, rows):
             factor = 1
-            if j <= rows/2:
-                factor = ((columns -i)/columns + (rows - j)/rows)/2
-            elif j >= rows/2:
-                factor =((columns -i)/columns +  (1- (rows - j)/rows))/2
+            if j <= rows / 2:
+                factor = ((columns - i) / columns + (rows - j) / rows) / 2
+            elif j >= rows / 2:
+                factor = ((columns - i) / columns + (1 - (rows - j) / rows)) / 2
 
             else:
                 factor = (columns - i) / columns
@@ -976,71 +808,248 @@ def edgeWeightedBlending(left_img, right_img, factors_left, factors_right):
     except():
         print("Matrices are not the same shape")
 
-def preprocessing(frames_og,shapes, seam_size):
+
+def preprocessing(frames_og, shapes, seam_size):
     H = getHMatrixRegions(frames_og, shapes)
+    # H[0] performs X shift
+    # H[1][0] peforms y hift
+    # H[2] does something
+    # H[2][1] = H[2][1] +0.5
     bounds = calc_sloped_coords(frames_og[0], H)
     pos_bot, pos_top = bounds
     dst = cv2.warpPerspective(frames_og[1], H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
     seam_1 = dst[int(pos_top[1]):int(pos_bot[1]), int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
-    factors = computeBlendingMatrixBidirectional(seam_1.shape)
+    factors = computeBlendingMatrix(seam_1.shape)
     init_stitch = cpuStitch(frames_og, H, shapes, seam_size, factors, bounds)
     cv2.imwrite("Init_stitch_sub.jpg", init_stitch)
-    #joined2 = cv2.hconcat(frames)
-    #cv2.imwrite("joined_cameras.jpg", joined2)
+    # joined2 = cv2.hconcat(frames)
+    # cv2.imwrite("joined_cameras.jpg", joined2)
     cv2.imwrite("init_stitch.jpg", init_stitch)
     return H, bounds, factors
-def perspectiveWarp(frames,shapes,H,seam_size,factors,bounds,priorityList):
-    dst = cv2.warpPerspective(frames[1], H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
-    #result = get_seams(dst, frames[0], seam_size, factors, bounds)
-    return dst
-    #priorityList[2].insert(0,(get_seams_parallel,(dst, frames[0], seam_size, factors, bounds,priorityList)))
-def performWarpBlendStitch(frames_og, shapes, H, seam_size,factors,bounds,count,buffer):
-    startTime = time.time()
-    #dst = cv2.warpPerspective(frames_og[1], H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
-    result = cpuStitch(frames_og, H, shapes, seam_size, factors, bounds)
-    performWarpBlendStitchTime= str(time.time() - startTime)
-    #print(performWarpBlendStitchTime)
-    buffer.insert((count, cv2.resize(result, (1280, 720))))
-    #return cv2.resize(result, (1280, 720))
-def checkBuffer(buffer, next_tag, out_1):
-    timeout = 0
-    while timeout < 100:
-        if not buffer.isEmpty():
-            timeout = 0
 
-            if buffer.peek()[0] == next_tag:
-                out_1.write(buffer.pop()[1])
-                #print(buffer)
-                print(next_tag)
-                next_tag+=1
-        else:
-            time.sleep(0.01)
-            timeout+=1
-def stitchVideos(videos, fps):
+
+def perspectiveWarp(frames, shapes, H, seam_size, factors, bounds, priorityList):
+    dst = cv2.warpPerspective(frames[1], H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
+    # result = get_seams(dst, frames[0], seam_size, factors, bounds)
+    return dst
+    # priorityList[2].insert(0,(get_seams_parallel,(dst, frames[0], seam_size, factors, bounds,priorityList)))
+
+
+def performWarpBlendStitch(frames_og, shapes, H, seam_size, factors, bounds, count, buffer):
+    startTime = time.time()
+    # dst = cv2.warpPerspective(frames_og[1], H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
+    result = cpuStitch(frames_og, H, shapes, seam_size, factors, bounds)
+    performWarpBlendStitchTime = str(time.time() - startTime)
+    # print(performWarpBlendStitchTime)
+    buffer.insert((count, cv2.resize(result, (1280, 720))))
+    # return cv2.resize(result, (1280, 720))
+
+
+def performWarpBlendStitchSaveFrames(frames_og, shapes, H, seam_size, factors, bounds, count, buffer):
+    startTime = time.time()
+    # dst = cv2.warpPerspective(frames_og[1], H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
+    result = cpuStitch(frames_og, H, shapes, seam_size, factors, bounds)
+    performWarpBlendStitchTime = str(time.time() - startTime)
+    # print(performWarpBlendStitchTime)
+    # buffer.insert((count, cv2.resize(result, (1280, 720))))
+    return cv2.resize(result, (1280, 720))
+def count_frames(videos):
+    frame_skip = 1000
+    fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
+    stitcher_time = ""
+    fixed_H_time = ""
+    hmatrixtime = ""
+    seam_size = 50
+    factors = []
+    bounds = []
+    out_1 = cv2.VideoWriter("output_regional_h.mp4", fourcc, 10.0, (1280, 720))
+    H = None
+    caps = []
+    frame_count = []
+    for video in videos:
+        caps.append((cv2.VideoCapture(video)))
+        frame_count.append(0)
+    count = 0
+    cams_up = True
+    index = 0
+    for cap in caps:
+        while True:
+            ret, frame = cap.read()
+            if ret:
+                frame_count[index] += 1
+            else:
+                print()
+                index += 1
+                break
+    print(frame_count)
+
+
+def generate_training_data(videos):
     print(os.cpu_count())
 
-    for i in range(20):
-        frame_skip = 800
+    frame_skip = 100
+    fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
+    stitcher_time = ""
+    fixed_H_time = ""
+    hmatrixtime = ""
+    seam_size = 50
+    factors = []
+    bounds = []
+    out_1 = cv2.VideoWriter("output_regional_h.mp4", fourcc, 10.0, (1280, 720))
+    H = None
+    caps = []
+    for video in videos:
+        caps.append((cv2.VideoCapture(video)))
+    count = 0
+    cams_up = True
+    buffer = PriorityQueue()
+    priorityList = []
+    next_tag = 0
+    startTime2 = time.time()
+
+    startTime2 = time.time()
+    frame_num = 0
+    while cams_up:
+        frames = []
+        shapes = []
+        frames_og = []
+        for cap in caps:
+            ret, frame = cap.read()
+            if not ret:
+                cams_up = False
+                # print("end of video stream")
+                break
+            shapes.append(frame.shape)
+            frames_og.append(frame)
+        if count <= frame_skip:
+            count += 1
+            next_tag = count
+            continue
+
+        if H is None:
+            # place this at the end of the highest priority list, since it should always be run asap when needed
+            # priorityList[0].append((preprocessing,[frames_og,shapes, seam_size]))
+            # H, bounds, factors = preprocessing(frames_og,shapes, seam_size)
+
+            # H, bounds, factors=preprocessing(frames_og,shapes, seam_size)
+            H, bounds, factors = preprocessing(frames_og, shapes, seam_size)
+            print(H)
+            # buffer_runner = executor.submit(checkBuffer, *[buffer, next_tag, out_1])
+
+        # if SVM return false
+        # spawn a preprocesing thread
+
+        startTime = time.time()
+        print(type(H))
+        H_temp = np.copy(H)
+
+       #for x_shift in range(-10,10,3):
+       #     #print(H)
+       #     H_temp[1][0] =   H[1][0] + x_shift/100
+       #     for y_shift in range(-10,10,3):
+       #         H_temp[0][0] =  H[0][0]  + y_shift/100
+        #        if y_shift != 0 or x_shift !=0:
+        result = performWarpBlendStitchSaveFrames(frames_og, shapes, H_temp, seam_size, factors, bounds, count, buffer)
+        cv2.imwrite("videos_og\\frame_" + str(frame_num) + ".jpg", result)
+            #H_temp = H
+
+        # fixed_h_result = performWarpBlendStitch(frames_og, shapes, H, seam_size,factors,bounds,count,buffer)
+        # out_1.write(fixed_h_result)
+        frame_num += 1
+        count += 1
+        # if count > frame_skip + 10000:
+        #    break
+
+    # with open('h_matrix_gen_time.csv', 'w') as outfile:
+    #    outfile.write(hmatrixtime)
+
+
+#    H, bounds, factors = preprocessing(frames_og, shapes, seam_size)
+
+class VideoStitcher:
+    def __init__(self):
+        self.H = None
+        self.logreg = None
+        self.bounds = None
+        self.factors = None
+        self.dopreprocessing = True
+        self.best_score = 0
+
+    def validateStitch(self,buffer,images,  shapes, seam_size,threshold):
+        #print("Hit")
+        if not buffer.isEmpty():
+            #print("Here!")
+            #print((buffer.peek()[1]))
+            image = cv2.resize(cv2.cvtColor(buffer.peek()[1],cv2.COLOR_BGR2GRAY),(600,400)).flatten()
+            #cv2.resize(),(600,400)).flatten()
+            score = self.logreg.predict_proba([image])[0][1]
+            print(score)
+            if self.best_score == 0:
+                self.best_score = score
+            if score < threshold:
+                self.dopreprocessing = True
+                self.best_score = score
+            elif score > self.best_score:
+                print("recreating h matrix")
+                self.preprocessing(images, shapes, seam_size)
+    def preprocessing(self,frames_og, shapes, seam_size):
+        self.H = self.getHMatrixRegions(frames_og, shapes)
+        # H[0] performs X shift
+        # H[1][0] peforms y hift
+        # H[2] does something
+        # H[2][1] = H[2][1] +0.5
+        self.bounds = calc_sloped_coords(frames_og[0], self.H)
+        pos_bot, pos_top = self.bounds
+        dst = cv2.warpPerspective(frames_og[1], self.H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
+        seam_1 = dst[int(pos_top[1]):int(pos_bot[1]), int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
+        self.factors = computeBlendingMatrix(seam_1.shape)
+        init_stitch = cpuStitch(frames_og, self.H, shapes, seam_size, self.factors, self.bounds)
+        cv2.imwrite("Init_stitch_sub.jpg", init_stitch)
+        # joined2 = cv2.hconcat(frames)
+        # cv2.imwrite("joined_cameras.jpg", joined2)
+        cv2.imwrite("init_stitch.jpg", init_stitch)
+        #return bounds, factors
+
+    def checkBuffer(self,buffer, next_tag, out_1):
+        timeout = 0
+        while timeout < 100:
+            if not buffer.isEmpty():
+                timeout = 0
+
+                if buffer.peek()[0] == next_tag:
+
+                    out_1.write(buffer.pop()[1])
+                    # print(buffer)
+                    #print(next_tag)
+                    next_tag += 1
+            else:
+                time.sleep(0.01)
+                timeout += 1
+
+    def stitchVideos(self,videos, fps):
+        print(os.cpu_count())
+        frame_skip = 100
         fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
         stitcher_time = ""
         fixed_H_time = ""
         hmatrixtime = ""
         seam_size = 50
-        factors = []
-        bounds = []
+        #factors = []
+        #bounds = []
         out_1 = cv2.VideoWriter("output_regional_h.mp4", fourcc, 10.0, (1280, 720))
-        H = None
+        #H = None
         caps = []
+        validation_counter = 0
         for video in videos:
             caps.append((cv2.VideoCapture(video)))
         count = 0
         cams_up = True
         buffer = PriorityQueue()
         priorityList = []
-        next_tag =0
+        next_tag = 0
         startTime2 = time.time()
 
-        with ThreadPoolExecutor(max_workers=16) as executor:
+        with ThreadPoolExecutor(max_workers=8) as executor:
             startTime2 = time.time()
 
             while cams_up:
@@ -1051,7 +1060,7 @@ def stitchVideos(videos, fps):
                     ret, frame = cap.read()
                     if not ret:
                         cams_up = False
-                        #print("end of video stream")
+                        # print("end of video stream")
                         break
                     shapes.append(frame.shape)
                     frames_og.append(frame)
@@ -1062,27 +1071,29 @@ def stitchVideos(videos, fps):
                     # print(count)
                     continue
 
-                if H is None:
-                    #place this at the end of the highest priority list, since it should always be run asap when needed
-                    #priorityList[0].append((preprocessing,[frames_og,shapes, seam_size]))
-                    #H, bounds, factors = preprocessing(frames_og,shapes, seam_size)
+                if self.H is None or self.dopreprocessing:
+                    # place this at the end of the highest priority list, since it should always be run asap when needed
+                    # priorityList[0].append((preprocessing,[frames_og,shapes, seam_size]))
+                    # H, bounds, factors = preprocessing(frames_og,shapes, seam_size)
 
-                   # H, bounds, factors=preprocessing(frames_og,shapes, seam_size)
-                    H, bounds, factors = preprocessing(frames_og,shapes, seam_size)
-                    buffer_runner = executor.submit(checkBuffer, *[buffer, next_tag, out_1])
-
-                #if SVM return false
-                #spawn a preprocesing thread
+                    # H, bounds, factors=preprocessing(frames_og,shapes, seam_size)
+                    self.preprocessing(frames_og, shapes, seam_size)
+                    self.dopreprocessing = False
+                    print(self.H)
+                    buffer_runner = executor.submit(self.checkBuffer, *[buffer, next_tag, out_1])
+                # if SVM return false
+                # spawn a preprocesing thread
 
                 startTime = time.time()
-                executor.submit(performWarpBlendStitch,*[frames_og, shapes, H, seam_size,factors,bounds,count,buffer])
-                #fixed_h_result = performWarpBlendStitch(frames_og, shapes, H, seam_size,factors,bounds,count,buffer)
-                #out_1.write(fixed_h_result)
-                count+=1
-                #if count > frame_skip + 10000:
-                #    break
-        buffer_runner.result()
-        print(time.time()-startTime2)
+                executor.submit(performWarpBlendStitch, *[frames_og, shapes, self.H, seam_size, self.factors, self.bounds, count, buffer])
+                validation_counter+=1
+                if validation_counter % 100 == 0:
+                    validation_counter = 0
+                    #executor.submit(self.validateStitch,*[buffer,frames_og,shapes, seam_size,0.9])
+                #self.validateStitch(buffer, frames_og, shapes, seam_size, 0.9)
+                count += 1
+            buffer_runner.result()
+        print(time.time() - startTime2)
         with open('stitcher_times.csv', 'w') as outfile:
             outfile.write(stitcher_time)
         with open('fixed_h_times.csv', 'w') as outfile:
@@ -1090,11 +1101,197 @@ def stitchVideos(videos, fps):
         # with open('h_matrix_gen_time.csv', 'w') as outfile:
         #    outfile.write(hmatrixtime)
 
+    def getHMatrixRegions(self, frames, shapes):
+        H = None
+        MIN_MATCH_COUNT = 10
+
+        # Initiate SIFT detector
+        sift = cv2.SIFT_create()
+        # find the keypoints and descriptors with SIFT
+        # temporary for testing, set frames to first 2 frames in the input array
+        # this should be changed later to fully support long arrays of frames
+        img1 = cv2.cvtColor(frames[1], cv2.COLOR_BGR2GRAY)
+        img2 = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
+        kp1, des1 = sift.detectAndCompute(img1, None)
+        kp2, des2 = sift.detectAndCompute(img2, None)
+        mid_x = int(img1.shape[1] / 2)
+        mid_y = int(img1.shape[0] / 2)
+
+        regions_boundries_1 = []
+        # regions_boundries_2 = []
+        # Below are keypoints for 4 segments
+        # regions_boundries_1 = [((0, mid_x), (0, mid_y)), ((mid_x, img1.shape[1]), (0, mid_y)),
+        #                       ((0, mid_x), (mid_y, img1.shape[0])), ((mid_x, img1.shape[1]), (mid_y, img1.shape[0]))]
+        # regions_boundries_2 = [((0, mid_x), (0, mid_y)), ((mid_x, img2.shape[1]), (0, mid_y)),
+        #                       ((0, mid_x), (mid_y, img2.shape[0])), ((mid_x, img2.shape[1]), (mid_y, img2.shape[0]))]
+        # boundary5 = (int(mid_x / 2), int(mid_x + mid_x / 2), int(mid_y / 2), int(mid_y + mid_y / 2))
+        # regions_boundries_1 = [(0, mid_x, 0, mid_y), (mid_x, img1.shape[1], 0, mid_y),
+        #                      (0, mid_x, mid_y, img1.shape[0]), (mid_x, img1.shape[1], mid_y, img1.shape[0]), boundary5]
+        # regions_boundries_2 = [(0, mid_x, 0, mid_y), (mid_x, img2.shape[1], 0, mid_y), (0, mid_x, mid_y, img2.shape[0]),
+        #                       (mid_x, img2.shape[1], mid_y, img2.shape[0]), boundary5]
+
+        # Try slices instead
+        point_0 = 0
+        point_1 = img1.shape[0] / 4
+        step = (img1.shape[0] / 3) / 2
+        # horitzontal slices
+        while (point_1 <= img1.shape[0]):
+            regions_boundries_1.append((0, img1.shape[1], point_0, point_1))
+            # temp_step = step
+            point_0 += step
+            point_1 += step
+        if (point_1 < img1.shape[0]):
+            regions_boundries_1.append((0, img1.shape[1], point_0, img1.shape[0]))
+        # vertical slices
+        # point_0 = 0
+        # point_1 = img1.shape[0] / 5
+        # step = (img1.shape[0] / 5) / 2
+
+        # while (point_1 <= img1.shape[0]):
+        #    regions_boundries_1.append((point_0, point_1, 0, img1.shape[0]))
+        #    # temp_step = step
+        #    point_0 += step
+        #    point_1 += step
+        # if (point_1 < img1.shape[0]):
+        #    regions_boundries_1.append((point_0, img1.shape[0], 0, img1.shape[0]))
+        regions_1 = partitionKeypoints2(img1, kp1, des1, regions_boundries_1)
+        regions_1 = cutSmallestRegions(regions_1)
+        # print(len(regions_1[0]))
+
+        regions_2 = partitionKeypoints2(img2, kp2, des2, regions_boundries_1)
+        regions_2 = cutSmallestRegions(regions_2)
+
+        best_region = []
+        FLANN_INDEX_KDTREE = 1
+        index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+        search_params = dict(checks=50)
+        flann = cv2.BFMatcher()
+        count_1 = 0
+        count_2 = 0
+
+        # reg_des_1 =np.array(reg_des_1)
+        # reg_des_2 =np.array(reg_des_2)
+
+        # region_1[1] = np.array(region_1[1])
+        region_index_1 = 0
+        region_index_2 = 0
+        best_1 = -1
+        best_2 = -1
+        i = 0
+        j = 0
+        for region_1 in regions_1[1]:
+            region_index_2 = 0
+
+            j = 0
+            test1 = np.array(region_1)
+            for region_2 in regions_2[1]:
+                j += 1
+                test2 = np.array(region_2)
+                if (region_index_1 != region_index_2):
+                    # region_2[1] = np.array(region_2[1])
+
+                    # print(type(des1[0]))
+                    # print(type(region_1[1][1]))
+                    # print(str(i) + " : " + str(j))
+                    matches = flann.knnMatch(test1, test2, k=2)
+                    # store all the good matches as per Lowe's ratio test.
+                    good = []
+                    H = None
+                    for m, n in matches:
+                        if m.distance < 0.6 * n.distance:
+                            good.append(m)
+                    if len(good) > len(best_region):
+                        best_region = good
+                        best_1 = region_index_1
+                        best_2 = region_index_2
+                region_index_2 += 1
+            i += 1
+            region_index_1 += 1
+        good = best_region
+
+        best_region_1 = [regions_1[0][best_1], regions_1[1][best_1]]
+
+        best_region_2 = [regions_2[0][best_2], regions_2[1][best_2]]
+        distance = []
+        if len(good) > MIN_MATCH_COUNT:
+            src_pts = []
+            dst_pts = []
+            avg_x_change = 0
+            avg_y_change = 0
+            for m in good:
+                distance.append(m.distance)
+                src_pt = best_region_1[0][m.queryIdx].pt
+                dst_pt = best_region_2[0][m.trainIdx].pt
+                # src_pts.append(src_pt)
+                # dst_pts.append(dst_pt)
+                avg_x_change += abs(src_pt[0] - dst_pt[0])
+                avg_y_change += abs(src_pt[1] - dst_pt[1])
+            distance = np.array(distance)
+
+            print(distance.sum()/len(distance))
+            avg_x_change = avg_x_change / len(good)
+            avg_y_change = avg_y_change / len(good)
+
+            deviation = 10
+            filter_count = 0
+            print("Good: ", len(good))
+            for m in good:
+                src_pt = best_region_1[0][m.queryIdx].pt
+                dst_pt = best_region_2[0][m.trainIdx].pt
+                x_change = abs(src_pt[0] - dst_pt[0])
+                y_change = abs(src_pt[1] - dst_pt[1])
+                if avg_y_change + deviation >= y_change >= avg_y_change - deviation:
+                    if avg_x_change + deviation >= x_change >= avg_x_change - deviation:
+                        src_pts.append(src_pt)
+                        dst_pts.append(dst_pt)
+                        pass
+                else:
+                    pass
+            src_pts = np.float32(src_pts).reshape(-1, 1, 2)
+            dst_pts = np.float32(dst_pts).reshape(-1, 1, 2)
+
+            #
+            # print(filter_count)
+            # src_pts = np.float32([best_region_1[0][m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+            # dst_pts = np.float32([best_region_2[0][m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+            H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 3.0)
+            img3 = cv2.drawMatches(img1, best_region_1[0], img2, best_region_2[0], good, None,
+                                   flags=cv2.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS)
+            cv2.imwrite("Matching_keypoints.jpg", img3)
+            # H = cv2.getPerspectiveTransform(src_pts, dst_pts)
+            matchesMask = mask.ravel().tolist()
+            # h, w, c = img2.shape
+            # pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
+            # dst = cv2.perspectiveTransform(pts, M)
+            # dst are the corners of the left image on the right image.
+
+            # img2 = cv2.polylines(img2, [np.int32(dst)], True, 255, 3, cv2.LINE_AA)
+            # cv2.imshow("Test", img2)
+            # cv2.waitKey(0)
+        else:
+            print("Not enough matches are found - {}/{}".format(len(good), MIN_MATCH_COUNT))
+            matchesMask = None
+            return None
+        return H
+
+    def run(self):
+        #self.logreg = ImageValidator.get_model(["videos_og", "videos_og_1"], "videos_shifted", 1000)
+
+        self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",
+                      r".\\take_1_trimmed\\output_2.mp4"], 15)
+
+
 def main():
-    stitchVideos(
-        [r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4", r".\\take_1_trimmed\\output_2.mp4"],
-        15)
-    # stitchVideos([r".\\take_2_videos\\output_0.mp4",r".\\take_2_videos\\output_1.mp4",  r".\\take_2_videos\\output_2.mp4"], 15)
+    #generate_training_data(
+    #    [r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4", r".\\take_1_trimmed\\output_2.mp4"])
+    #validator = ImageValidator()
+    #logreg = ImageValidator.get_model(["videos_og", "videos_og_1"], "videos_shifted", 1000)
+    #stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4", r".\\take_1_trimmed\\output_2.mp4"], 15)
+    stitcher = VideoStitcher()
+    stitcher.run()
+
+# count_frames(
+#     [r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4", r".\\take_1_trimmed\\output_2.mp4"])
 
 
 if __name__ == "__main__":
