@@ -43,7 +43,12 @@ class PriorityQueue(object):
         return self.queue.pop(index)
 
     def peek(self):
-        return self.queue[0]
+        if self.isEmpty():
+            return [[0]]
+        try:
+            return self.queue[0]
+        except:
+            return [[0]]
 
 
 def findInitialHomography():
@@ -541,7 +546,6 @@ def verticalSlices(shapes, regions_boundries_1):
         regions_boundries_1.append((point_0, shapes[0][0], 0, shapes[0][0]))
 
 
-
 def getHMatrix(frames):
     H = None
     MIN_MATCH_COUNT = 10
@@ -835,16 +839,6 @@ def perspectiveWarp(frames, shapes, H, seam_size, factors, bounds, priorityList)
     # priorityList[2].insert(0,(get_seams_parallel,(dst, frames[0], seam_size, factors, bounds,priorityList)))
 
 
-def performWarpBlendStitch(frames_og, shapes, H, seam_size, factors, bounds, count, buffer):
-    startTime = time.time()
-    # dst = cv2.warpPerspective(frames_og[1], H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
-    result = cpuStitch(frames_og, H, shapes, seam_size, factors, bounds)
-    performWarpBlendStitchTime = str(time.time() - startTime)
-    # print(performWarpBlendStitchTime)
-    buffer.insert((count, cv2.resize(result, (1280, 720))))
-    # return cv2.resize(result, (1280, 720))
-
-
 def performWarpBlendStitchSaveFrames(frames_og, shapes, H, seam_size, factors, bounds, count, buffer):
     startTime = time.time()
     # dst = cv2.warpPerspective(frames_og[1], H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
@@ -853,6 +847,8 @@ def performWarpBlendStitchSaveFrames(frames_og, shapes, H, seam_size, factors, b
     # print(performWarpBlendStitchTime)
     # buffer.insert((count, cv2.resize(result, (1280, 720))))
     return cv2.resize(result, (1280, 720))
+
+
 def count_frames(videos):
     frame_skip = 1000
     fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
@@ -943,15 +939,15 @@ def generate_training_data(videos):
         print(type(H))
         H_temp = np.copy(H)
 
-       #for x_shift in range(-10,10,3):
-       #     #print(H)
-       #     H_temp[1][0] =   H[1][0] + x_shift/100
-       #     for y_shift in range(-10,10,3):
-       #         H_temp[0][0] =  H[0][0]  + y_shift/100
+        # for x_shift in range(-10,10,3):
+        #     #print(H)
+        #     H_temp[1][0] =   H[1][0] + x_shift/100
+        #     for y_shift in range(-10,10,3):
+        #         H_temp[0][0] =  H[0][0]  + y_shift/100
         #        if y_shift != 0 or x_shift !=0:
         result = performWarpBlendStitchSaveFrames(frames_og, shapes, H_temp, seam_size, factors, bounds, count, buffer)
         cv2.imwrite("videos_og\\frame_" + str(frame_num) + ".jpg", result)
-            #H_temp = H
+        # H_temp = H
 
         # fixed_h_result = performWarpBlendStitch(frames_og, shapes, H, seam_size,factors,bounds,count,buffer)
         # out_1.write(fixed_h_result)
@@ -974,45 +970,103 @@ class VideoStitcher:
         self.factors = None
         self.dopreprocessing = True
         self.best_score = 0
+        self.best_diff = -1
+        self.current_frames = None
+    def validateStitch(self, buffer, images, shapes, seam_size, threshold):
+        # print(buffer.isEmpty())
+        # if not buffer.isEmpty():
+        # print("Here!")
+        # print((buffer.peek()[1]))
+        image = cv2.resize(cv2.cvtColor(buffer.peek()[1], cv2.COLOR_BGR2GRAY), (600, 400)).flatten()
+        # cv2.resize(),(600,400)).flatten()
+        # score = self.logreg.predict_proba([image])[0][1]
+        # print(image)
+        score = self.logreg.predict([image])[0]
+        # print(self.logreg.predict([image]))
+        # print("score:",score)
+        if self.best_score == 0:
+            self.best_score = score
+        if score < threshold:
+            print("Score:", score, "falls below threshold", threshold)
+            self.dopreprocessing = True
+            self.best_score = score
+        elif score < self.best_score:
+            print("Score:", score, "is better than best_score:", self.best_score)
+            self.dopreprocessing = True
+            self.best_score = score
 
-    def validateStitch(self,buffer,images,  shapes, seam_size,threshold):
-        #print("Hit")
-        if not buffer.isEmpty():
-            #print("Here!")
-            #print((buffer.peek()[1]))
-            image = cv2.resize(cv2.cvtColor(buffer.peek()[1],cv2.COLOR_BGR2GRAY),(600,400)).flatten()
-            #cv2.resize(),(600,400)).flatten()
-            score = self.logreg.predict_proba([image])[0][1]
-            print(score)
-            if self.best_score == 0:
-                self.best_score = score
-            if score < threshold:
-                self.dopreprocessing = True
-                self.best_score = score
-            elif score > self.best_score:
-                print("recreating h matrix")
-                self.preprocessing(images, shapes, seam_size)
-    def preprocessing(self,frames_og, shapes, seam_size):
+    def validateStitchDiffs(self,buffer,shapes, seam_size, threshold):
+        timeout2 = 0
+        while timeout2 < 100:
+            #print(type(self.current_frames))
+            if self.current_frames is not None:
+                timeout2 = 0
+
+                #print("hit")
+                #frames = buffer.peek()[2]
+                frames = self.current_frames
+                pos_bot, pos_top = self.bounds
+                dst = cv2.warpPerspective(frames[1], self.H, (frames[0].shape[1] + 500, frames[0].shape[0]),
+                                          borderMode=cv2.BORDER_CONSTANT)
+
+                seam_1 = dst[int(pos_top[1]):int(pos_bot[1]), int(frames[0].shape[1]) - seam_size:int(frames[0].shape[1])]
+                seam_2 = frames[0][int(pos_top[1]):int(pos_bot[1]),int(frames[0].shape[1]) - seam_size:int(frames[0].shape[1])]
+                score = cv2.absdiff(seam_1,seam_2).sum()/(seam_2.shape[0] + seam_2.shape[1])
+                #print("Best Diff:", self.best_diff, "VS New Diff:",score)
+                if self.best_diff == -1:
+                    print("Setting initial score")
+                    self.best_diff = score
+                elif self.best_diff > score:
+                    print("Diff Change: ", self.best_diff, "->", score)
+                    self.best_diff = score
+                    self.dopreprocessing = True
+                time.sleep(1)
+            else:
+                #print("validation waiting")
+                timeout2+=1
+                time.sleep(0.1)
+
+    def performWarpBlendStitch(self, frames_og, shapes, H, seam_size, factors, bounds, count, buffer):
+        startTime = time.time()
+        # dst = cv2.warpPerspective(frames_og[1], H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
+        result = cpuStitch(frames_og, H, shapes, seam_size, factors, bounds)
+        performWarpBlendStitchTime = str(time.time() - startTime)
+        # print(performWarpBlendStitchTime)
+        buffer.insert((count, cv2.resize(result, (1280, 720))))
+        self.current_frames = frames_og
+        # if self.validation_counter % self.validation_interval == 0:
+        #    self.validateStitch(result,frames_og,shapes,seam_size,0.9)
+
+    # return cv2.resize(result, (1280, 720))
+
+    def preprocessing(self, frames_og, shapes, seam_size):
+        print("running preprocessing")
         self.H = self.getHMatrixRegions(frames_og, shapes)
         # H[0] performs X shift
         # H[1][0] peforms y hift
         # H[2] does something
         # H[2][1] = H[2][1] +0.5
+
         self.bounds = calc_sloped_coords(frames_og[0], self.H)
+        dst = cv2.warpPerspective(frames_og[1], self.H, (shapes[0][1] + 500, shapes[0][0]),
+                                  borderMode=cv2.BORDER_CONSTANT)
         pos_bot, pos_top = self.bounds
-        dst = cv2.warpPerspective(frames_og[1], self.H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
+
         seam_1 = dst[int(pos_top[1]):int(pos_bot[1]), int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
+        seam_2 = frames_og[0][int(pos_top[1]):int(pos_bot[1]), int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
+        #print("Diff:",self.compare_images(seam_1,seam_2))
         self.factors = computeBlendingMatrix(seam_1.shape)
         init_stitch = cpuStitch(frames_og, self.H, shapes, seam_size, self.factors, self.bounds)
         cv2.imwrite("Init_stitch_sub.jpg", init_stitch)
         # joined2 = cv2.hconcat(frames)
         # cv2.imwrite("joined_cameras.jpg", joined2)
         cv2.imwrite("init_stitch.jpg", init_stitch)
-        #return bounds, factors
+        # return bounds, factors
 
-    def checkBuffer(self,buffer, next_tag, out_1):
+    def checkBuffer(self, buffer, next_tag, out_1):
         timeout = 0
         while timeout < 100:
+            #print("timeout")
             if not buffer.isEmpty():
                 timeout = 0
 
@@ -1020,13 +1074,34 @@ class VideoStitcher:
 
                     out_1.write(buffer.pop()[1])
                     # print(buffer)
-                    #print(next_tag)
+                    if (next_tag % 100 == 0):
+                        print(next_tag)
                     next_tag += 1
             else:
+                #print("buffer waiting")
                 time.sleep(0.01)
                 timeout += 1
+        self.current_frames = None
 
-    def stitchVideos(self,videos, fps):
+    # intented to be run over the seams
+    def compare_images(self, img1, img2):
+        img1_copy = cv2.cvtColor(img1,cv2.COLOR_BGR2GRAY)
+        img2_copy = cv2.cvtColor(img2,cv2.COLOR_BGR2GRAY)
+        img_1_border = [0, 0, 0, 0]
+        img_2_border = [0, 0, 0, 0]
+        if img1.shape[0] > img2.shape[0]:
+            pass
+        elif img1.shape[1] > img2.shape[1]:
+            pass
+        if img1.shape[0] > img2.shape[0]:
+            pass
+        elif img2.shape[1] < img2.shape[1]:
+            pass
+        diff = cv2.absdiff(img1_copy, img2_copy)
+        print(diff)
+        return diff.sum()
+
+    def stitchVideos(self, videos, fps):
         print(os.cpu_count())
         frame_skip = 100
         fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
@@ -1034,10 +1109,10 @@ class VideoStitcher:
         fixed_H_time = ""
         hmatrixtime = ""
         seam_size = 50
-        #factors = []
-        #bounds = []
+        # factors = []
+        # bounds = []
         out_1 = cv2.VideoWriter("output_regional_h.mp4", fourcc, 10.0, (1280, 720))
-        #H = None
+        # H = None
         caps = []
         validation_counter = 0
         for video in videos:
@@ -1048,8 +1123,10 @@ class VideoStitcher:
         priorityList = []
         next_tag = 0
         startTime2 = time.time()
-
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        self.validation_counter = 0
+        self.validation_interval = 100
+        initial = True
+        with ThreadPoolExecutor(max_workers=12) as executor:
             startTime2 = time.time()
 
             while cams_up:
@@ -1079,18 +1156,26 @@ class VideoStitcher:
                     # H, bounds, factors=preprocessing(frames_og,shapes, seam_size)
                     self.preprocessing(frames_og, shapes, seam_size)
                     self.dopreprocessing = False
-                    print(self.H)
+                    # print(self.H)
+                if initial:
+                    executor.submit(self.validateStitchDiffs, *[buffer, shapes, seam_size, 0.9])
                     buffer_runner = executor.submit(self.checkBuffer, *[buffer, next_tag, out_1])
+                    initial = False
                 # if SVM return false
                 # spawn a preprocesing thread
 
                 startTime = time.time()
-                executor.submit(performWarpBlendStitch, *[frames_og, shapes, self.H, seam_size, self.factors, self.bounds, count, buffer])
-                validation_counter+=1
-                if validation_counter % 100 == 0:
-                    validation_counter = 0
-                    #executor.submit(self.validateStitch,*[buffer,frames_og,shapes, seam_size,0.9])
-                #self.validateStitch(buffer, frames_og, shapes, seam_size, 0.9)
+                executor.submit(self.performWarpBlendStitch,
+                                *[frames_og, shapes, self.H, seam_size, self.factors, self.bounds, count, buffer])
+                self.validation_counter += 1
+                if self.validation_counter % 100 == 0:
+                    self.validation_counter = 0
+
+                    # validateStitch(self, buffer, images, shapes, seam_size, threshold):
+
+                    #executor.submit(self.validateStitch, *[buffer, frames_og, shapes, seam_size, 0.9])
+
+                # self.validateStitch(buffer, frames_og, shapes, seam_size, 0.9)
                 count += 1
             buffer_runner.result()
         print(time.time() - startTime2)
@@ -1228,13 +1313,13 @@ class VideoStitcher:
                 avg_y_change += abs(src_pt[1] - dst_pt[1])
             distance = np.array(distance)
 
-            print(distance.sum()/len(distance))
+            # print(distance.sum()/len(distance))
             avg_x_change = avg_x_change / len(good)
             avg_y_change = avg_y_change / len(good)
 
             deviation = 10
             filter_count = 0
-            print("Good: ", len(good))
+            # print("Good: ", len(good))
             for m in good:
                 src_pt = best_region_1[0][m.queryIdx].pt
                 dst_pt = best_region_2[0][m.trainIdx].pt
@@ -1278,17 +1363,18 @@ class VideoStitcher:
         #self.logreg = ImageValidator.get_model(["videos_og", "videos_og_1"], "videos_shifted", 1000)
 
         self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",
-                      r".\\take_1_trimmed\\output_2.mp4"], 15)
+                           r".\\take_1_trimmed\\output_2.mp4"], 15)
 
 
 def main():
-    #generate_training_data(
+    # generate_training_data(
     #    [r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4", r".\\take_1_trimmed\\output_2.mp4"])
-    #validator = ImageValidator()
-    #logreg = ImageValidator.get_model(["videos_og", "videos_og_1"], "videos_shifted", 1000)
-    #stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4", r".\\take_1_trimmed\\output_2.mp4"], 15)
+    # validator = ImageValidator()
+    # logreg = ImageValidator.get_model(["videos_og", "videos_og_1"], "videos_shifted", 1000)
+    # stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4", r".\\take_1_trimmed\\output_2.mp4"], 15)
     stitcher = VideoStitcher()
     stitcher.run()
+
 
 # count_frames(
 #     [r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4", r".\\take_1_trimmed\\output_2.mp4"])

@@ -34,7 +34,7 @@ def generate_dataset(true_data_dirs, false_data_dir):
             image = cv2.resize(cv2.imread(file, cv2.IMREAD_GRAYSCALE), (600,400)).flatten()
             #print(type(image))
             data.append(image)
-            targets.append(1)
+            targets.append(2)
             count += 1
             if count >= cap/len(true_data_dirs):
                 break
@@ -45,7 +45,7 @@ def generate_dataset(true_data_dirs, false_data_dir):
         file = os.path.join(false_data_dir, item)
         image = cv2.resize(cv2.imread(file, cv2.IMREAD_GRAYSCALE), (600,400)).flatten()
         data.append(image)
-        targets.append(0)
+        targets.append(1)
         count2 +=1
 
         if count2 >= count:
@@ -126,12 +126,12 @@ def logreg(X_train, X_test, y_train, y_test):
     startTime = time.time()
     #print(X_test[1])
     #pred_prob = logit.predict_proba(X_test)
-    pred = logit.predict((X_test))
+    pred = logit.predict(X_test)
     test = pd.DataFrame()
     test['pred'] = pred
     test['target'] = y_test
     #test['predict_proba'] = pred_prob[:,1]
-    print(test.loc[test['target'] != 1])
+    print(test.loc[test['pred'] > 1])
     #print(time.time() - startTime)
     #for x in logit.predict_proba(X_test):
     #    print(x)
