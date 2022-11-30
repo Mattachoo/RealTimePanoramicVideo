@@ -1365,6 +1365,15 @@ class VideoStitcher:
         self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",
                            r".\\take_1_trimmed\\output_2.mp4"], 15)
 
+def adaptive_thresholding(imgs, type):
+    threshold_imgs = []
+    for imgage in imgs:
+        img = cv2.medianBlur(imgage, 5)
+        th = cv2.adaptiveThreshold(img,255,cv2.type, cv2.THRESH_BINARY,11,2)
+        threshold_imgs.append(th)
+    return threshold_imgs
+    #th3 = cv2.adaptiveThreshold(img,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,11,2)
+
 
 def main():
     # generate_training_data(
