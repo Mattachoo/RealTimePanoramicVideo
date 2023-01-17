@@ -750,7 +750,6 @@ def edgeWeightedBlendingColumnsOnly(left_img, right_img):
 
 def computeBlendingMatrix(img_shape):
     row_blend_span = 10
-
     # result = left_img
     edge_blend_window = 200
     columns = img_shape[1]
@@ -770,7 +769,6 @@ def computeBlendingMatrix(img_shape):
             factor = (columns - i) / columns
             factors_left[j][i] = (factor, factor, factor)
             factors_right[j][i] = (1 - factor, 1 - factor, 1 - factor)
-
     return factors_left, factors_right
 
 
@@ -995,6 +993,20 @@ class VideoStitcher:
             self.dopreprocessing = True
             self.best_score = score
 
+    def gen_score(self,frames, H, seam_size):
+        pos_bot, pos_top = self.bounds
+        dst = cv2.warpPerspective(frames[1], H, (frames[0].shape[1] + 500, frames[0].shape[0]),
+                                  borderMode=cv2.BORDER_CONSTANT)
+        # dst = cv2.cvtColor(dst, cv2.COLOR_BGR2GRAY)
+        img = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
+        #img = frames[0]
+        seam_1 = dst[int(pos_top[1]):int(pos_bot[1]), int(frames[0].shape[1]) - seam_size:int(frames[0].shape[1])]
+        seam_2 = img[int(pos_top[1]):int(pos_bot[1]), int(img.shape[1]) - seam_size:int(img.shape[1])]
+
+        #seam_1, seam_2 = adaptive_thresholding([seam_1,seam_2],cv2.ADAPTIVE_THRESH_MEAN_C)
+        return cv2.absdiff(seam_1, seam_2).sum() / (seam_2.shape[0] + seam_2.shape[1])
+        # print("score:",score)
+        # print(score)
     def validateStitchDiffs(self,buffer,shapes, seam_size, threshold):
         timeout2 = 0
         while timeout2 < 100:
@@ -1002,20 +1014,30 @@ class VideoStitcher:
             if self.current_frames is not None:
                 timeout2 = 0
 
-                #print("hit")
                 #frames = buffer.peek()[2]
                 frames = self.current_frames
-                pos_bot, pos_top = self.bounds
-                dst = cv2.warpPerspective(frames[1], self.H, (frames[0].shape[1] + 500, frames[0].shape[0]),
-                                          borderMode=cv2.BORDER_CONSTANT)
+                score = self.gen_score(frames, self.H, seam_size)
+                new_H = self.getHMatrixRegions(frames,shapes)
 
-                seam_1 = dst[int(pos_top[1]):int(pos_bot[1]), int(frames[0].shape[1]) - seam_size:int(frames[0].shape[1])]
-                seam_2 = frames[0][int(pos_top[1]):int(pos_bot[1]),int(frames[0].shape[1]) - seam_size:int(frames[0].shape[1])]
-                score = cv2.absdiff(seam_1,seam_2).sum()/(seam_2.shape[0] + seam_2.shape[1])
+                #print("score:",score)
+                #print(score)
+
                 #print("Best Diff:", self.best_diff, "VS New Diff:",score)
+
                 if self.best_diff == -1:
-                    print("Setting initial score")
+                    print("Setting initial score:", score)
                     self.best_diff = score
+                    continue
+                score_new = math.inf
+                if np.sum(new_H) > 0:
+                    score_new = self.gen_score(frames, new_H, seam_size)
+                    if score_new < score:
+                        print("found better score:", score_new, "Better than:", score)
+                        self.best_diff = score_new
+                        self.H = new_H
+                        self.redo_preprocessing(frames,shapes,seam_size)
+                        continue
+
                 elif self.best_diff > score:
                     print("Diff Change: ", self.best_diff, "->", score)
                     self.best_diff = score
@@ -1041,7 +1063,38 @@ class VideoStitcher:
 
     def preprocessing(self, frames_og, shapes, seam_size):
         print("running preprocessing")
+        startTime = time.time()
         self.H = self.getHMatrixRegions(frames_og, shapes)
+        if np.sum(self.H) == 0:
+            return
+        print(time.time() - startTime)
+        # H[0] performs X shift
+        # H[1][0] peforms y hift
+        # H[2] does something
+        # H[2][1] = H[2][1] +0.5
+
+        self.bounds = calc_sloped_coords(frames_og[0], self.H)
+        dst = cv2.warpPerspective(frames_og[1], self.H, (shapes[0][1] + 500, shapes[0][0]),
+                                  borderMode=cv2.BORDER_CONSTANT)
+        pos_bot, pos_top = self.bounds
+
+        seam_1 = dst[int(pos_top[1]):int(pos_bot[1]), int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
+        seam_2 = frames_og[0][int(pos_top[1]):int(pos_bot[1]), int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
+        #print("Diff:",self.compare_images(seam_1,seam_2))
+        self.factors = computeBlendingMatrix(seam_1.shape)
+        init_stitch = cpuStitch(frames_og, self.H, shapes, seam_size, self.factors, self.bounds)
+        cv2.imwrite("Init_stitch_sub.jpg", init_stitch)
+        # joined2 = cv2.hconcat(frames)
+        # cv2.imwrite("joined_cameras.jpg", joined2)
+        cv2.imwrite("init_stitch.jpg", init_stitch)
+        # return bounds, factors
+
+    def redo_preprocessing(self, frames_og, shapes, seam_size):
+        print("running preprocessing")
+        startTime = time.time()
+        if np.sum(self.H) == 0:
+            return
+        print(time.time() - startTime)
         # H[0] performs X shift
         # H[1][0] peforms y hift
         # H[2] does something
@@ -1065,18 +1118,28 @@ class VideoStitcher:
 
     def checkBuffer(self, buffer, next_tag, out_1):
         timeout = 0
+        timeout2 = 0
+        time_cap=1000
         while timeout < 100:
             #print("timeout")
             if not buffer.isEmpty():
                 timeout = 0
-
+                timeout2+=1
                 if buffer.peek()[0] == next_tag:
+                    timeout2 = 0
 
                     out_1.write(buffer.pop()[1])
                     # print(buffer)
                     if (next_tag % 100 == 0):
                         print(next_tag)
                     next_tag += 1
+                if timeout2 > time_cap:
+                    print("time_cap")
+                    timeout2 = 0
+                    new_frame = buffer.pop()
+                    next_tag = new_frame[0]+1
+                    out_1.write(new_frame[1])
+
             else:
                 #print("buffer waiting")
                 time.sleep(0.01)
@@ -1103,7 +1166,7 @@ class VideoStitcher:
 
     def stitchVideos(self, videos, fps):
         print(os.cpu_count())
-        frame_skip = 100
+        frame_skip = 1000
         fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
         stitcher_time = ""
         fixed_H_time = ""
@@ -1155,8 +1218,11 @@ class VideoStitcher:
 
                     # H, bounds, factors=preprocessing(frames_og,shapes, seam_size)
                     self.preprocessing(frames_og, shapes, seam_size)
-                    self.dopreprocessing = False
+                    if np.sum(self.H) > 0:
+                        self.dopreprocessing = False
                     # print(self.H)
+                    else:
+                        continue
                 if initial:
                     executor.submit(self.validateStitchDiffs, *[buffer, shapes, seam_size, 0.9])
                     buffer_runner = executor.submit(self.checkBuffer, *[buffer, next_tag, out_1])
@@ -1332,27 +1398,32 @@ class VideoStitcher:
                         pass
                 else:
                     pass
+
             src_pts = np.float32(src_pts).reshape(-1, 1, 2)
             dst_pts = np.float32(dst_pts).reshape(-1, 1, 2)
+            if(len(src_pts) >= MIN_MATCH_COUNT):
 
-            #
-            # print(filter_count)
-            # src_pts = np.float32([best_region_1[0][m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
-            # dst_pts = np.float32([best_region_2[0][m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
-            H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 3.0)
-            img3 = cv2.drawMatches(img1, best_region_1[0], img2, best_region_2[0], good, None,
-                                   flags=cv2.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS)
-            cv2.imwrite("Matching_keypoints.jpg", img3)
-            # H = cv2.getPerspectiveTransform(src_pts, dst_pts)
-            matchesMask = mask.ravel().tolist()
-            # h, w, c = img2.shape
-            # pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
-            # dst = cv2.perspectiveTransform(pts, M)
-            # dst are the corners of the left image on the right image.
+                #
+                # print(filter_count)
+                # src_pts = np.float32([best_region_1[0][m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+                # dst_pts = np.float32([best_region_2[0][m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+                H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 3.0)
+                img3 = cv2.drawMatches(img1, best_region_1[0], img2, best_region_2[0], good, None,
+                                       flags=cv2.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS)
+                cv2.imwrite("Matching_keypoints.jpg", img3)
+                # H = cv2.getPerspectiveTransform(src_pts, dst_pts)
+                matchesMask = mask.ravel().tolist()
+                # h, w, c = img2.shape
+                # pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
+                # dst = cv2.perspectiveTransform(pts, M)
+                # dst are the corners of the left image on the right image.
 
-            # img2 = cv2.polylines(img2, [np.int32(dst)], True, 255, 3, cv2.LINE_AA)
-            # cv2.imshow("Test", img2)
-            # cv2.waitKey(0)
+                # img2 = cv2.polylines(img2, [np.int32(dst)], True, 255, 3, cv2.LINE_AA)
+                # cv2.imshow("Test", img2)
+                # cv2.waitKey(0)
+            else:
+                print("Not enough points")
+                H = np.array([[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0]])
         else:
             print("Not enough matches are found - {}/{}".format(len(good), MIN_MATCH_COUNT))
             matchesMask = None
@@ -1362,15 +1433,28 @@ class VideoStitcher:
     def run(self):
         #self.logreg = ImageValidator.get_model(["videos_og", "videos_og_1"], "videos_shifted", 1000)
 
-        self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",
-                           r".\\take_1_trimmed\\output_2.mp4"], 15)
+        #self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",
+        #                   r".\\take_1_trimmed\\output_2.mp4"], 15)
+        self.stitchVideos([r".\\rain_recording\\output_0.mp4", r".\\rain_recording\\output_1.mp4",
+                           r".\\rain_recording\\output_2.mp4"], 15)
 
 def adaptive_thresholding(imgs, type):
     threshold_imgs = []
-    for imgage in imgs:
-        img = cv2.medianBlur(imgage, 5)
-        th = cv2.adaptiveThreshold(img,255,cv2.type, cv2.THRESH_BINARY,11,2)
-        threshold_imgs.append(th)
+    #print("test")
+    for image in imgs:
+        img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        if(cv2.THRESH_OTSU):
+            blur = cv2.GaussianBlur(img, (5, 5), 0)
+            ret, th = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            threshold_imgs.append(th)
+
+        else:
+        #print("test2")
+            img = cv2.medianBlur(img, 5)
+            th = cv2.adaptiveThreshold(img,255,type, cv2.THRESH_BINARY,11,2)
+            threshold_imgs.append(th)
+    #print("Test3")
     return threshold_imgs
     #th3 = cv2.adaptiveThreshold(img,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,11,2)
 
