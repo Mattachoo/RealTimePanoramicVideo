@@ -970,6 +970,7 @@ class VideoStitcher:
         self.best_score = 0
         self.best_diff = -1
         self.current_frames = None
+
     def validateStitch(self, buffer, images, shapes, seam_size, threshold):
         # print(buffer.isEmpty())
         # if not buffer.isEmpty():
@@ -993,36 +994,37 @@ class VideoStitcher:
             self.dopreprocessing = True
             self.best_score = score
 
-    def gen_score(self,frames, H, seam_size):
+    def gen_score(self, frames, H, seam_size):
         pos_bot, pos_top = self.bounds
         dst = cv2.warpPerspective(frames[1], H, (frames[0].shape[1] + 500, frames[0].shape[0]),
                                   borderMode=cv2.BORDER_CONSTANT)
         # dst = cv2.cvtColor(dst, cv2.COLOR_BGR2GRAY)
         img = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
-        #img = frames[0]
+        # img = frames[0]
         seam_1 = dst[int(pos_top[1]):int(pos_bot[1]), int(frames[0].shape[1]) - seam_size:int(frames[0].shape[1])]
         seam_2 = img[int(pos_top[1]):int(pos_bot[1]), int(img.shape[1]) - seam_size:int(img.shape[1])]
 
-        #seam_1, seam_2 = adaptive_thresholding([seam_1,seam_2],cv2.ADAPTIVE_THRESH_MEAN_C)
+        # seam_1, seam_2 = adaptive_thresholding([seam_1,seam_2],cv2.ADAPTIVE_THRESH_MEAN_C)
         return cv2.absdiff(seam_1, seam_2).sum() / (seam_2.shape[0] + seam_2.shape[1])
         # print("score:",score)
         # print(score)
-    def validateStitchDiffs(self,buffer,shapes, seam_size, threshold):
+
+    def validateStitchDiffs(self, buffer, shapes, seam_size, threshold):
         timeout2 = 0
         while timeout2 < 100:
-            #print(type(self.current_frames))
+            # print(type(self.current_frames))
             if self.current_frames is not None:
                 timeout2 = 0
 
-                #frames = buffer.peek()[2]
+                # frames = buffer.peek()[2]
                 frames = self.current_frames
                 score = self.gen_score(frames, self.H, seam_size)
-                new_H = self.getHMatrixRegions(frames,shapes)
+                new_H = self.getHMatrixRegions(frames, shapes)
 
-                #print("score:",score)
-                #print(score)
+                # print("score:",score)
+                # print(score)
 
-                #print("Best Diff:", self.best_diff, "VS New Diff:",score)
+                # print("Best Diff:", self.best_diff, "VS New Diff:",score)
 
                 if self.best_diff == -1:
                     print("Setting initial score:", score)
@@ -1035,7 +1037,7 @@ class VideoStitcher:
                         print("found better score:", score_new, "Better than:", score)
                         self.best_diff = score_new
                         self.H = new_H
-                        self.redo_preprocessing(frames,shapes,seam_size)
+                        self.redo_preprocessing(frames, shapes, seam_size)
                         continue
 
                 elif self.best_diff > score:
@@ -1044,8 +1046,8 @@ class VideoStitcher:
                     self.dopreprocessing = True
                 time.sleep(1)
             else:
-                #print("validation waiting")
-                timeout2+=1
+                # print("validation waiting")
+                timeout2 += 1
                 time.sleep(0.1)
 
     def performWarpBlendStitch(self, frames_og, shapes, H, seam_size, factors, bounds, count, buffer):
@@ -1054,8 +1056,12 @@ class VideoStitcher:
         result = cpuStitch(frames_og, H, shapes, seam_size, factors, bounds)
         performWarpBlendStitchTime = str(time.time() - startTime)
         # print(performWarpBlendStitchTime)
-        buffer.insert((count, cv2.resize(result, (1280, 720))))
-        self.current_frames = frames_og
+        if buffer is not None:
+            buffer.insert((count, cv2.resize(result, (1280, 720))))
+            self.current_frames = frames_og
+        else:
+            cv2.imshow("blend_stitch_result", cv2.resize(result, (1280, 720)))
+            cv2.waitKey(0)
         # if self.validation_counter % self.validation_interval == 0:
         #    self.validateStitch(result,frames_og,shapes,seam_size,0.9)
 
@@ -1074,13 +1080,15 @@ class VideoStitcher:
         # H[2][1] = H[2][1] +0.5
 
         self.bounds = calc_sloped_coords(frames_og[0], self.H)
+       # print(self.bounds)
         dst = cv2.warpPerspective(frames_og[1], self.H, (shapes[0][1] + 500, shapes[0][0]),
                                   borderMode=cv2.BORDER_CONSTANT)
         pos_bot, pos_top = self.bounds
 
         seam_1 = dst[int(pos_top[1]):int(pos_bot[1]), int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
-        seam_2 = frames_og[0][int(pos_top[1]):int(pos_bot[1]), int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
-        #print("Diff:",self.compare_images(seam_1,seam_2))
+        seam_2 = frames_og[0][int(pos_top[1]):int(pos_bot[1]),
+                 int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
+        # print("Diff:",self.compare_images(seam_1,seam_2))
         self.factors = computeBlendingMatrix(seam_1.shape)
         init_stitch = cpuStitch(frames_og, self.H, shapes, seam_size, self.factors, self.bounds)
         cv2.imwrite("Init_stitch_sub.jpg", init_stitch)
@@ -1106,8 +1114,9 @@ class VideoStitcher:
         pos_bot, pos_top = self.bounds
 
         seam_1 = dst[int(pos_top[1]):int(pos_bot[1]), int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
-        seam_2 = frames_og[0][int(pos_top[1]):int(pos_bot[1]), int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
-        #print("Diff:",self.compare_images(seam_1,seam_2))
+        seam_2 = frames_og[0][int(pos_top[1]):int(pos_bot[1]),
+                 int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
+        # print("Diff:",self.compare_images(seam_1,seam_2))
         self.factors = computeBlendingMatrix(seam_1.shape)
         init_stitch = cpuStitch(frames_og, self.H, shapes, seam_size, self.factors, self.bounds)
         cv2.imwrite("Init_stitch_sub.jpg", init_stitch)
@@ -1119,12 +1128,12 @@ class VideoStitcher:
     def checkBuffer(self, buffer, next_tag, out_1):
         timeout = 0
         timeout2 = 0
-        time_cap=1000
+        time_cap = 1000
         while timeout < 100:
-            #print("timeout")
+            # print("timeout")
             if not buffer.isEmpty():
                 timeout = 0
-                timeout2+=1
+                timeout2 += 1
                 if buffer.peek()[0] == next_tag:
                     timeout2 = 0
 
@@ -1137,19 +1146,19 @@ class VideoStitcher:
                     print("time_cap")
                     timeout2 = 0
                     new_frame = buffer.pop()
-                    next_tag = new_frame[0]+1
+                    next_tag = new_frame[0] + 1
                     out_1.write(new_frame[1])
 
             else:
-                #print("buffer waiting")
+                # print("buffer waiting")
                 time.sleep(0.01)
                 timeout += 1
         self.current_frames = None
 
     # intented to be run over the seams
     def compare_images(self, img1, img2):
-        img1_copy = cv2.cvtColor(img1,cv2.COLOR_BGR2GRAY)
-        img2_copy = cv2.cvtColor(img2,cv2.COLOR_BGR2GRAY)
+        img1_copy = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+        img2_copy = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
         img_1_border = [0, 0, 0, 0]
         img_2_border = [0, 0, 0, 0]
         if img1.shape[0] > img2.shape[0]:
@@ -1239,7 +1248,7 @@ class VideoStitcher:
 
                     # validateStitch(self, buffer, images, shapes, seam_size, threshold):
 
-                    #executor.submit(self.validateStitch, *[buffer, frames_og, shapes, seam_size, 0.9])
+                    # executor.submit(self.validateStitch, *[buffer, frames_og, shapes, seam_size, 0.9])
 
                 # self.validateStitch(buffer, frames_og, shapes, seam_size, 0.9)
                 count += 1
@@ -1261,6 +1270,7 @@ class VideoStitcher:
         # find the keypoints and descriptors with SIFT
         # temporary for testing, set frames to first 2 frames in the input array
         # this should be changed later to fully support long arrays of frames
+        print(frames[1].shape)
         img1 = cv2.cvtColor(frames[1], cv2.COLOR_BGR2GRAY)
         img2 = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
         kp1, des1 = sift.detectAndCompute(img1, None)
@@ -1401,7 +1411,7 @@ class VideoStitcher:
 
             src_pts = np.float32(src_pts).reshape(-1, 1, 2)
             dst_pts = np.float32(dst_pts).reshape(-1, 1, 2)
-            if(len(src_pts) >= MIN_MATCH_COUNT):
+            if (len(src_pts) >= MIN_MATCH_COUNT):
 
                 #
                 # print(filter_count)
@@ -1423,40 +1433,146 @@ class VideoStitcher:
                 # cv2.waitKey(0)
             else:
                 print("Not enough points")
-                H = np.array([[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0]])
+                H = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
         else:
             print("Not enough matches are found - {}/{}".format(len(good), MIN_MATCH_COUNT))
             matchesMask = None
             return None
         return H
 
+    def gen_label_dict(self, img_labels):
+
+        img_dict = {}
+        print(img_labels)
+        for i in range(0, len(img_labels)):
+            for j in range(0,len(img_labels[i])):
+                value = img_labels[i][j]
+                if img_labels[i][j] not in img_dict.keys():
+                    #print(value)
+                    img_dict[value] = [(i,j)]
+                else:
+                    img_dict[value].append((i,j))
+        return img_dict
+        # print(len(slic_result.getLabels()))
+    def  get_superpixel_scores(self, img1, label_dict, img2):
+        img_scores_dict = {}
+
+        for key in label_dict.keys():
+            sum = 0
+            for coord in label_dict[key]:
+                #get absdiff of rpgs values, then add them together
+                sum += np.sum(cv2.absdiff(img1[coord[0]][coord[1]],img2[coord[0]][coord[1]]))
+                #img_scores_dict[key] = sum
+                #sum += item
+            img_scores_dict[key] = 1- (sum/len(label_dict[key]))/765
+        #print(img_scores_dict)
+        return img_scores_dict
+    def superpixel_cost_estimation(self,img1, img2):
+        #take pixel values of super pixel cell, sum them up, subtract by value from corresponding image
+        #perform same operation for edges, using histogram of gradient descents
+        #take sum of both. Result is the cost of that given cell
+        img1_superpixels = cv2.ximgproc.createSuperpixelSLIC(img1)
+        img1_superpixels.iterate(50)
+
+        img1_num_of_superpixels = img1_superpixels.getNumberOfSuperpixels()
+        img1_superpixel_labels = img1_superpixels.getLabels()
+        img1_superpixel_mask = img1_superpixels.getLabelContourMask()
+
+        img2_superpixels = cv2.ximgproc.createSuperpixelSLIC(img2)
+        img2_superpixels.iterate(50)
+
+        img2_num_of_superpixels = img2_superpixels.getNumberOfSuperpixels()
+        img2_superpixel_labels = img2_superpixels.getLabels()
+        img3_superpixel_mask = img2_superpixels.getLabelContourMask()
+
+        #to make processing easier, we can create a dictionary for each image, which has a label as its key, and a list of coordiantes are items
+        img1_dict = self.gen_label_dict(img1_superpixel_labels)
+        img2_dict = self.gen_label_dict(img2_superpixel_labels)
+        #Scores closer to 1 are more similar
+        img_scores_dict = self.get_superpixel_scores(img1, img1_dict,img2)
+
+        img2[0:img1.shape[0], 0:img1.shape[1]] = img1
+        print("Gray shape:", cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY))
+        diffIntensity =(cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY))
+        print("Shape:",diffIntensity.shape)
+        for key in img1_dict.keys():
+            for coord in img1_dict[key]:
+                #print(img_scores_dict[key] * 255)
+                diffIntensity[coord[0]][coord[1]] = img_scores_dict[key] * 255
+        print(diffIntensity)
+        #diffIntensity = cv2.cvtColor(diffIntensity, cv2.COLOR_BGR2GRAY)
+        cv2.imshow("Diff Intensity", diffIntensity)
+        cv2.waitKey(0)
+        return img_scores_dict
+        #print(len(img1_dict[0]))
     def run(self):
-        #self.logreg = ImageValidator.get_model(["videos_og", "videos_og_1"], "videos_shifted", 1000)
+        # self.logreg = ImageValidator.get_model(["videos_og", "videos_og_1"], "videos_shifted", 1000)
 
-        #self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",
-        #                   r".\\take_1_trimmed\\output_2.mp4"], 15)
-        self.stitchVideos([r".\\rain_recording\\output_0.mp4", r".\\rain_recording\\output_1.mp4",
-                           r".\\rain_recording\\output_2.mp4"], 15)
+         self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",
+                           r".\\take_1_trimmed\\output_2.mp4"], 15)
+        #self.stitchVideos([r".\\rain_recording\\output_0.mp4", r".\\rain_recording\\output_1.mp4",
+        #                   r".\\rain_recording\\output_2.mp4"], 15)
 
+    # below is test code for single set of frames
+    def shift_and_seam(self, img1_path, img2_path):
+        #print(img1_path)
+        img1 = cv2.imread(img1_path)
+        img2 = cv2.imread(img2_path)
+        img1_gray = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+        img2_gray = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+        shapes = [img1.shape, img2.shape]
+        frames_og = [img1, img2]
+        seam_size = 50
+        self.preprocessing(frames_og, shapes, seam_size)
+        #self.performWarpBlendStitch(frames_og, shapes, self.H, seam_size, self.factors, self.bounds, 0, None)
+
+        h, w, c =  frames_og[1].shape
+        pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
+        corners = cv2.perspectiveTransform(pts, self.H)
+        #print([[0,0],corners[0][0].tolist()])
+        seam_finder = cv2.detail_GraphCutSeamFinder("COST_COLOR")
+        mask1 = np.full(img1.shape[:2], 255)
+        mask2 = np.full(img2.shape[:2], 255)
+        #seam_finder.find(frames_og, [[0,0   ],[245,74]],[mask1,mask2])
+        slic_result = cv2.ximgproc.createSuperpixelSLIC(img1)
+        slic_result.iterate(50)
+        slic_mask = slic_result.getLabelContourMask()
+        #slic_mask = slic_result.getLabels()
+        #below shows the defined regions over img1
+        masked_img1 = cv2.bitwise_and(img1,img1,mask=cv2.bitwise_not(slic_mask))
+       # print(len(slic_result.getLabels()))
+        #cv2.imshow("test",img1)
+        #cv2.waitKey(0)
+        dst = cv2.warpPerspective(img2, self.H, (img1.shape[1] + 500, img1.shape[0]), borderMode=cv2.BORDER_CONSTANT)
+        #dst[0:img1.shape[0],0:img1.shape[1]] = img1
+        #cv2.imshow("Test",dst)
+        #cv2.waitKey(0)
+        self.superpixel_cost_estimation(img1, dst)
+
+        #for item in (slic_result.getLabels()[1]):
+        #    print(item)
+        #cv2.imshow("slice_result",slic_result.getLabels())
+        #cv2.imshow("Masked image", masked_img1)
+        #cv2.waitKey(0)
 def adaptive_thresholding(imgs, type):
     threshold_imgs = []
-    #print("test")
+    # print("test")
     for image in imgs:
         img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-        if(cv2.THRESH_OTSU):
+        if (cv2.THRESH_OTSU):
             blur = cv2.GaussianBlur(img, (5, 5), 0)
             ret, th = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
             threshold_imgs.append(th)
 
         else:
-        #print("test2")
+            # print("test2")
             img = cv2.medianBlur(img, 5)
-            th = cv2.adaptiveThreshold(img,255,type, cv2.THRESH_BINARY,11,2)
+            th = cv2.adaptiveThreshold(img, 255, type, cv2.THRESH_BINARY, 11, 2)
             threshold_imgs.append(th)
-    #print("Test3")
+    # print("Test3")
     return threshold_imgs
-    #th3 = cv2.adaptiveThreshold(img,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,11,2)
+    # th3 = cv2.adaptiveThreshold(img,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,11,2)
 
 
 def main():
@@ -1466,8 +1582,12 @@ def main():
     # logreg = ImageValidator.get_model(["videos_og", "videos_og_1"], "videos_shifted", 1000)
     # stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4", r".\\take_1_trimmed\\output_2.mp4"], 15)
     stitcher = VideoStitcher()
-    stitcher.run()
+    #frame_1100.jpg produces a pretty good stitch
+    frame = "frame_1100.jpg"
 
+    base_dir = r"C:\Users\mattp\PycharmProjects\pythonProject\video_to_frame_take1_trimmed"
+    stitcher.shift_and_seam(base_dir + r"\video_1\\"+frame,base_dir + r"\video_0\\" + frame)
+    #stitcher.run()
 
 # count_frames(
 #     [r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4", r".\\take_1_trimmed\\output_2.mp4"])
