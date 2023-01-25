@@ -1443,7 +1443,7 @@ class VideoStitcher:
     def gen_label_dict(self, img_labels):
 
         img_dict = {}
-        print(img_labels)
+        #print(img_labels)
         for i in range(0, len(img_labels)):
             for j in range(0,len(img_labels[i])):
                 value = img_labels[i][j]
@@ -1464,7 +1464,7 @@ class VideoStitcher:
                 sum += np.sum(cv2.absdiff(img1[coord[0]][coord[1]],img2[coord[0]][coord[1]]))
                 #img_scores_dict[key] = sum
                 #sum += item
-            img_scores_dict[key] = 1- (sum/len(label_dict[key]))/765
+            img_scores_dict[key] = (sum/len(label_dict[key]))/765
         #print(img_scores_dict)
         return img_scores_dict
     def superpixel_cost_estimation(self,img1, img2):
@@ -1492,18 +1492,19 @@ class VideoStitcher:
         img_scores_dict = self.get_superpixel_scores(img1, img1_dict,img2)
 
         img2[0:img1.shape[0], 0:img1.shape[1]] = img1
-        print("Gray shape:", cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY))
+        #print("Gray shape:", cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY))
         diffIntensity =(cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY))
-        print("Shape:",diffIntensity.shape)
+        #print("Shape:",diffIntensity.shape)
         for key in img1_dict.keys():
             for coord in img1_dict[key]:
                 #print(img_scores_dict[key] * 255)
                 diffIntensity[coord[0]][coord[1]] = img_scores_dict[key] * 255
-        print(diffIntensity)
+        #print(diffIntensity)
         #diffIntensity = cv2.cvtColor(diffIntensity, cv2.COLOR_BGR2GRAY)
-        cv2.imshow("Diff Intensity", diffIntensity)
-        cv2.waitKey(0)
-        return img_scores_dict
+        #cv2.imshow("Diff Intensity", diffIntensity)
+        #cv2.waitKey(0)
+        superpixel_graph = self.build_superpixel_graph2(img1_superpixel_labels, img_scores_dict)
+        return img_scores_dict, superpixel_graph, img1_superpixels
         #print(len(img1_dict[0]))
     def run(self):
         # self.logreg = ImageValidator.get_model(["videos_og", "videos_og_1"], "videos_shifted", 1000)
@@ -1526,13 +1527,6 @@ class VideoStitcher:
         self.preprocessing(frames_og, shapes, seam_size)
         #self.performWarpBlendStitch(frames_og, shapes, self.H, seam_size, self.factors, self.bounds, 0, None)
 
-        h, w, c =  frames_og[1].shape
-        pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
-        corners = cv2.perspectiveTransform(pts, self.H)
-        #print([[0,0],corners[0][0].tolist()])
-        seam_finder = cv2.detail_GraphCutSeamFinder("COST_COLOR")
-        mask1 = np.full(img1.shape[:2], 255)
-        mask2 = np.full(img2.shape[:2], 255)
         #seam_finder.find(frames_og, [[0,0   ],[245,74]],[mask1,mask2])
         slic_result = cv2.ximgproc.createSuperpixelSLIC(img1)
         slic_result.iterate(50)
@@ -1544,16 +1538,139 @@ class VideoStitcher:
         #cv2.imshow("test",img1)
         #cv2.waitKey(0)
         dst = cv2.warpPerspective(img2, self.H, (img1.shape[1] + 500, img1.shape[0]), borderMode=cv2.BORDER_CONSTANT)
-        #dst[0:img1.shape[0],0:img1.shape[1]] = img1
+        #dst[0:img1.shape[0t],0:img1.shape[1]] = img1
         #cv2.imshow("Test",dst)
-        #cv2.waitKey(0)
-        self.superpixel_cost_estimation(img1, dst)
+        #cv2.waitKey(0)zsss
 
+        h, w, c = img2.shape
+        pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
+        corners = cv2.perspectiveTransform(pts, self.H)
+        # print(corners)
+        # compare [0][0] and [1][0], take greater value
+        # compare [2][0] and [3][0], take smaller value
+        # compare [0][1] and [3][1], take greater value
+        # compare [1][1] amd [2][1], take smaller value
+
+        x_min = max(corners[0][0][0], corners[1][0][0])
+        x_max = min(corners[2][0][0], corners[3][0][0])
+        y_min = max(corners[0][0][1], corners[3][0][1])
+        y_max = min(corners[1][0][1], corners[2][0][1])
+
+        pos_bot, pos_top = self.bounds
+        factors_left, factors_right = self.factors
+
+        startTime = time.time()
+        seam_size = 500
+        seam_1 = img1[int(y_min):int(y_max), int(x_min):int(x_max-x_min)]
+        seam_2 = dst[int(y_min):int(y_max), int(x_min):int(x_max-x_min)]
+
+
+        #cv2.imshow("Seam_1",seam_1)
+        #cv2.imshow("Seam_2",seam_2)
+
+        #cv2.waitKey(0)
+        #cost_graph = self.superpixel_cost_estimation(img1, dst)
+        img_scores_dict, superpixel_graph, superpixels = self.superpixel_cost_estimation(seam_1, seam_2)
+        lowest_cost_path = self.find_lowest_cost_path(img_scores_dict, superpixel_graph, superpixels)
+        lowest_cost_path_img = cv2.cvtColor(seam_1, cv2.COLOR_BGR2GRAY)
+        seam1_supers = cv2.ximgproc.createSuperpixelSLIC(seam_1)
+        seam1_supers.iterate(50)
+        print(lowest_cost_path[1])
+        for y in range(0,len(seam1_supers.getLabels()[0])):
+            #print(y)
+            for x in range(0,len(seam1_supers.getLabels())):
+               # print(seam1_supers.getLabels()[x][y])
+
+                if seam1_supers.getLabels()[x][y] in lowest_cost_path[1]:
+                    lowest_cost_path_img[x][y] = 255
+                else:
+                    lowest_cost_path_img[x][y] = 0
+        print("Best Path")
+        cv2.imshow("Best Path", lowest_cost_path_img)
+        cv2.waitKey(0)
         #for item in (slic_result.getLabels()[1]):
         #    print(item)
         #cv2.imshow("slice_result",slic_result.getLabels())
         #cv2.imshow("Masked image", masked_img1)
         #cv2.waitKey(0)
+
+    def find_lowest_cost_path(self,img_scores_dict, superpixel_graph, superpixels):
+        #We want to start from superpixel which lay on the top of the overlapping area
+        sp_dict = {}
+        for superpixel in set(superpixels.getLabels().flatten()):
+            sp_dict[superpixel] = [math.inf, []]
+        top_superpixels = set(superpixels.getLabels()[0])
+        print("Top Superpixels:",top_superpixels)
+        for superpixel in top_superpixels:
+            sp_dict[superpixel][0] = 0
+            #print(sp_dict[superpixel][1])
+            sp_dict[superpixel][1] = [superpixel]
+            self.recursive_find(img_scores_dict,sp_dict,superpixel, superpixel_graph)
+        #print(sp_dict)
+        bottom_superpixels = set(superpixels.getLabels()[-1])
+        lowest_cost_path = [math.inf, set()]
+
+        for bottom_superpixel in bottom_superpixels:
+            if sp_dict[bottom_superpixel][0] < lowest_cost_path[0]:
+                lowest_cost_path = sp_dict[bottom_superpixel]
+        print(lowest_cost_path)
+        return lowest_cost_path
+    def recursive_find(self,img_scores,sp_dict,source, superpixel_graph):
+        vertices = superpixel_graph[source]
+        for vertex in vertices:
+            cost = img_scores[vertex] + sp_dict[source][0]
+            if cost < sp_dict[vertex][0]:
+                sp_dict[vertex][0] = cost
+                sp_dict[vertex][1] = np.append(sp_dict[source][1],vertex)
+                self.recursive_find(img_scores,sp_dict,vertex,superpixel_graph)
+
+    def build_superpixel_graph(self,superpixels, cost_graph):
+        superpixel_graph = {}
+        #We can say there is a path between superpixels if they are adjacent to eaachother
+        for x in range(0,len(superpixels)):
+            print(len(superpixels[0]))
+            for y in range(0,len(superpixels[x])):
+                if superpixels[x][y] not in superpixel_graph.keys():
+                    superpixel_graph[superpixels[x][y]] = set()
+                #if new super pixel to the right, add to set
+                if x + 1 < len(superpixels):
+                    if superpixels[x][y] != superpixels[x+1][y]:
+                        superpixel_graph[superpixels[x][y]].add(superpixels[x+1][y])
+                    if y + 1 < len(superpixels[x]):
+                        if superpixels[x][y] != superpixels[x + 1][y+1]:
+                            superpixel_graph[superpixels[x][y]].add(superpixels[x + 1][y+1])
+                if 0 <= x - 1:
+                    if superpixels[x][y] != superpixels[x-1][y]:
+                        superpixel_graph[superpixels[x][y]].add(superpixels[x-1][y])
+                    if superpixels[x][y] != superpixels[x-1][y+1]:
+                        superpixel_graph[superpixels[x][y]].add(superpixels[x-1][y+1])
+        return superpixel_graph
+    def build_superpixel_graph2(self,superpixels, cost_graph):
+        superpixel_graph = {}
+        #We can say there is a path between superpixels if they are adjacent to eaachother
+        print("num of supers:", superpixels[-1][-1])
+        #Loop through Row
+        curr_id = -1
+        for y in range(0,len(superpixels[0])):
+            #loop through column
+            curr_id = -1
+            for x in range(0,len(superpixels)):
+                #if y+1 < len(superpixels[0]):
+                if superpixels[x][y] != curr_id and curr_id != -1:
+                        if curr_id not in superpixel_graph:
+                            superpixel_graph[curr_id] = set(curr_id)
+
+                        else:
+                            superpixel_graph[curr_id].add(superpixels[x][y])
+                curr_id = superpixels[x][y]
+                if curr_id not in superpixel_graph:
+                    superpixel_graph[curr_id] = set()
+
+        #for key in superpixel_graph.keys():
+        #    print(key, ":", superpixel_graph[key])
+        print("graph size: ",len(superpixel_graph))
+
+        return superpixel_graph
 def adaptive_thresholding(imgs, type):
     threshold_imgs = []
     # print("test")
