@@ -1491,7 +1491,7 @@ class VideoStitcher:
         #Scores closer to 1 are more similar
         img_scores_dict = self.get_superpixel_scores(img1, img1_dict,img2)
 
-        img2[0:img1.shape[0], 0:img1.shape[1]] = img1
+        #img2[0:img1.shape[0], 0:img1.shape[1]] = img1
         #print("Gray shape:", cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY))
         diffIntensity =(cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY))
         #print("Shape:",diffIntensity.shape)
@@ -1561,9 +1561,9 @@ class VideoStitcher:
 
         startTime = time.time()
         seam_size = 500
+
         seam_1 = img1[int(y_min):int(y_max), int(x_min):int(x_max-x_min)]
         seam_2 = dst[int(y_min):int(y_max), int(x_min):int(x_max-x_min)]
-
 
         #cv2.imshow("Seam_1",seam_1)
         #cv2.imshow("Seam_2",seam_2)
@@ -1572,21 +1572,34 @@ class VideoStitcher:
         #cost_graph = self.superpixel_cost_estimation(img1, dst)
         img_scores_dict, superpixel_graph, superpixels = self.superpixel_cost_estimation(seam_1, seam_2)
         lowest_cost_path = self.find_lowest_cost_path(img_scores_dict, superpixel_graph, superpixels)
-        lowest_cost_path_img = cv2.cvtColor(seam_1, cv2.COLOR_BGR2GRAY)
+        lowest_cost_path_img = (seam_1) * 0
         seam1_supers = cv2.ximgproc.createSuperpixelSLIC(seam_1)
         seam1_supers.iterate(50)
-        print(lowest_cost_path[1])
-        for y in range(0,len(seam1_supers.getLabels()[0])):
+        #print(lowest_cost_path[1])
+        #print(len(seam1_supers.getLabels())," : ",len(seam1_supers.getLabels()[0]))
+        for y in range(0,len(seam1_supers.getLabels())):
             #print(y)
-            for x in range(0,len(seam1_supers.getLabels())):
+            for x in range(0,len(seam1_supers.getLabels()[0])):
                # print(seam1_supers.getLabels()[x][y])
+                #print(x)
+                if seam1_supers.getLabels()[y][x] in lowest_cost_path[1]:
+                    lowest_cost_path_img[y][x] = (255,255,255)
+                    #print("breaking")
+                    break
+                lowest_cost_path_img[y][x] = (255,255,255)
 
-                if seam1_supers.getLabels()[x][y] in lowest_cost_path[1]:
-                    lowest_cost_path_img[x][y] = 255
-                else:
-                    lowest_cost_path_img[x][y] = 0
         print("Best Path")
-        cv2.imshow("Best Path", lowest_cost_path_img)
+        #thresh, lowest_cost_path_img = cv2.threshold(lowest_cost_path_img, 175, 255, cv2.THRESH_BINARY)
+        print(lowest_cost_path_img.shape, "VS", seam_1.shape)
+
+        #print(cv2.bitwise_and(lowest_cost_path_img,seam_1))
+        print((lowest_cost_path_img/255)* seam_1)
+        left_side = cv2.bitwise_and(seam_1, lowest_cost_path_img)
+        right_side = cv2.bitwise_and(seam_2, cv2.bitwise_not(lowest_cost_path_img))
+        cv2.imshow("Left Side", seam_1)
+        cv2.imshow("Right Side", seam_2 )
+        cv2.imshow("Best Path", cv2.bitwise_or(left_side,right_side))
+
         cv2.waitKey(0)
         #for item in (slic_result.getLabels()[1]):
         #    print(item)
