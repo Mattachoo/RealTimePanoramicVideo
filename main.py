@@ -950,14 +950,9 @@ class VideoStitcher:
         self.threshold = 0
         self.img_scores_dict = None
     def validateStitch(self, buffer, images, shapes, seam_size, threshold):
-        # print(buffer.isEmpty())
-        # if not buffer.isEmpty():
-        # print("Here!")
-        # print((buffer.peek()[1]))
+
         image = cv2.resize(cv2.cvtColor(buffer.peek()[1], cv2.COLOR_BGR2GRAY), (600, 400)).flatten()
-        # cv2.resize(),(600,400)).flatten()
-        # score = self.logreg.predict_proba([image])[0][1]
-        # print(image)
+
         score = self.logreg.predict([image])[0]
         # print(self.logreg.predict([image]))
         # print("score:",score)
@@ -976,8 +971,9 @@ class VideoStitcher:
         pos_bot, pos_top = self.bounds
         dst = cv2.warpPerspective(frames[1], H, (frames[0].shape[1] + 500, frames[0].shape[0]),
                                   borderMode=cv2.BORDER_CONSTANT)
-        # dst = cv2.cvtColor(dst, cv2.COLOR_BGR2GRAY)
+        dst = cv2.cvtColor(dst, cv2.COLOR_BGR2GRAY)
         img = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
+
         # img = frames[0]
         seam_1 = dst[int(pos_top[1]):int(pos_bot[1]), int(frames[0].shape[1]) - seam_size:int(frames[0].shape[1])]
         seam_2 = img[int(pos_top[1]):int(pos_bot[1]), int(img.shape[1]) - seam_size:int(img.shape[1])]
@@ -1002,9 +998,15 @@ class VideoStitcher:
         # print("score:",score)
         # print(score)
 
+    def img_scores_sum(self, img_scores_dict):
+        sum = 0
+        for key in img_scores_dict.keys():
+            sum+= img_scores_dict[key]
+        return sum
 
     def validateStitchDiffs(self, buffer, shapes, seam_size, threshold):
         timeout2 = 0
+        #print("Hit")
         while timeout2 < 100:
             # print(type(self.current_frames))
             if self.current_frames is not None:
@@ -1012,26 +1014,46 @@ class VideoStitcher:
 
                 # frames = buffer.peek()[2]
                 frames = self.current_frames
-                score = self.gen_score(frames, self.H, seam_size)
                 new_H = self.getHMatrixRegions(frames, shapes)
-
+                #score = self.img_scores_sum(self.img_scores_dict)
+                if new_H is None:
+                    continue
+                img1 = frames[1]
+                img2 = frames[0]
                 # print("score:",score)
                 # print(score)
 
                 # print("Best Diff:", self.best_diff, "VS New Diff:",score)
-
+                dst = cv2.warpPerspective(img2, new_H, (img1.shape[1] + 500, img1.shape[0]),
+                                          borderMode=cv2.BORDER_CONSTANT)
                 if self.best_diff == -1:
-                    print("Setting initial score:", score)
+
+                    score = self.img_scores_sum(self.img_scores_dict)
                     self.best_diff = score
                     continue
+
                 score_new = math.inf
                 if np.sum(new_H) > 0:
-                    score_new = self.gen_score(frames, new_H, seam_size)
+                    #score_new = self.gen_score(frames, new_H, seam_size)
+                    h, w, c = img2.shape
+                    pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
+
+                    corners = cv2.perspectiveTransform(pts, new_H)
+                    x_min = max(self.corners[0][0][0], self.corners[1][0][0])
+                    x_max = min(self.corners[2][0][0], self.corners[3][0][0])
+                    y_min = max(self.corners[0][0][1], self.corners[3][0][1])
+                    y_max = min(self.corners[1][0][1], self.corners[2][0][1])
+
+                    seam_1 = img1[:, int(x_min):int(x_max - x_min)]
+                    seam_2 = dst[:, int(x_min):int(x_max - x_min)]
+                    img_scores_dict_new, superpixel_graph, superpixels = self.superpixel_cost_estimation(seam_1,seam_2)
+                    score_new = self.img_scores_sum(img_scores_dict_new)
+
                     if score_new < score:
                         print("found better score:", score_new, "Better than:", score)
                         self.best_diff = score_new
                         self.H = new_H
-                        self.redo_preprocessing(frames, shapes, seam_size)
+                        self.preprocessing(frames, shapes, seam_size)
                         continue
 
                 elif self.best_diff > score:
@@ -1040,9 +1062,11 @@ class VideoStitcher:
                     self.dopreprocessing = True
                 time.sleep(1)
             else:
-                # print("validation waiting")
+                #print("validation waiting")
                 timeout2 += 1
                 time.sleep(0.1)
+        print("validation time out")
+
 
     def superpixel_stitch(self, img1,dst,seam_size,factors,bounds):
 
@@ -1084,9 +1108,9 @@ class VideoStitcher:
         startTime = time.time()
         dst = cv2.warpPerspective(img1, H, (shapes[0][1] + 500, shapes[0][0]), borderMode=cv2.BORDER_CONSTANT)
         warpTime = time.time() - startTime
-        result = get_seams(dst, img2, seam_size, factors, bounds)
-        #result = self.superpixel_stitch(img2, dst,seam_size,factors,bounds)
-        print(time.time() - startTime)
+        #result = get_seams(dst, img2, seam_size, factors, bounds)
+        result = self.superpixel_stitch(img2, dst,seam_size,factors,bounds)
+        #print(time.time() - startTime)
         return result
 
     def performWarpBlendStitch(self, frames_og, shapes, H, seam_size, factors, bounds, count, buffer):
@@ -1123,9 +1147,10 @@ class VideoStitcher:
         print("running preprocessing")
         startTime = time.time()
         self.H = self.getHMatrixRegions(frames_og, shapes)
+        #print("H Mat done")
         if np.sum(self.H) == 0:
             return
-        print(time.time() - startTime)
+        #print(time.time() - startTime)
         # H[0] performs X shift
         # H[1][0] peforms y hift
         # H[2] does something
@@ -1141,17 +1166,19 @@ class VideoStitcher:
         seam_1 = dst[int(pos_top[1]):int(pos_bot[1]), int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
         seam_2 = frames_og[0][int(pos_top[1]):int(pos_bot[1]),
                  int(frames_og[0].shape[1]) - seam_size:int(frames_og[0].shape[1])]
-        print(seam_1.shape)
-        print(seam_2.shape)
+        #print(seam_1.shape)
+        #print(seam_2.shape)
         self.factors = computeBlendingMatrix(seam_1.shape)
+        #print("RUnning create_seam_masks")
         self.create_seam_masks(frames_og[0], frames_og[1])
-
+        print("Done with create_seam_masks")
         init_stitch = self.cpuStitch(frames_og, self.H, shapes, seam_size, self.factors, self.bounds)
+        print("Cpu stitch done")
         cv2.imwrite("Init_stitch_sub.jpg", init_stitch)
         cv2.imwrite("init_stitch.jpg", init_stitch)
 
     def redo_preprocessing(self, frames_og, shapes, seam_size):
-        print("running preprocessing")
+        print("running redo_preprocessing")
         startTime = time.time()
         if np.sum(self.H) == 0:
             return
@@ -1193,8 +1220,8 @@ class VideoStitcher:
                     out_1.write(buffer.pop()[1])
                     # print(buffer)
                     if (next_tag % 100 == 0):
-                        #print(next_tag)
-                        pass
+                        print(next_tag)
+                        #pass
                     next_tag += 1
                 if timeout2 > time_cap:
                     print("time_cap")
@@ -1204,7 +1231,7 @@ class VideoStitcher:
                     out_1.write(new_frame[1])
 
             else:
-                # print("buffer waiting")
+                #print("buffer waiting")
                 time.sleep(0.01)
                 timeout += 1
         self.current_frames = None
@@ -1254,7 +1281,7 @@ class VideoStitcher:
         initial = True
         with ThreadPoolExecutor(max_workers=12) as executor:
             startTime2 = time.time()
-
+            self.runnning = True
             while cams_up:
                 frames = []
                 shapes = []
@@ -1307,6 +1334,10 @@ class VideoStitcher:
                 # self.validateStitch(buffer, frames_og, shapes, seam_size, 0.9)
                 count += 1
             buffer_runner.result()
+
+            print("Buffer done")
+            out_1.release()
+            executor.shutdown()
         print(time.time() - startTime2)
         with open('stitcher_times.csv', 'w') as outfile:
             outfile.write(stitcher_time)
@@ -1316,15 +1347,14 @@ class VideoStitcher:
         #    outfile.write(hmatrixtime)
 
     def getHMatrixRegions(self, frames, shapes):
+        #print("Start getHMatrixRegions")
         H = None
         MIN_MATCH_COUNT = 10
-
         # Initiate SIFT detector
         sift = cv2.SIFT_create()
         # find the keypoints and descriptors with SIFT
         # temporary for testing, set frames to first 2 frames in the input array
         # this should be changed later to fully support long arrays of frames
-        print(frames[1].shape)
         img1 = cv2.cvtColor(frames[1], cv2.COLOR_BGR2GRAY)
         img2 = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
         kp1, des1 = sift.detectAndCompute(img1, None)
@@ -1333,19 +1363,7 @@ class VideoStitcher:
         mid_y = int(img1.shape[0] / 2)
 
         regions_boundries_1 = []
-        # regions_boundries_2 = []
-        # Below are keypoints for 4 segments
-        # regions_boundries_1 = [((0, mid_x), (0, mid_y)), ((mid_x, img1.shape[1]), (0, mid_y)),
-        #                       ((0, mid_x), (mid_y, img1.shape[0])), ((mid_x, img1.shape[1]), (mid_y, img1.shape[0]))]
-        # regions_boundries_2 = [((0, mid_x), (0, mid_y)), ((mid_x, img2.shape[1]), (0, mid_y)),
-        #                       ((0, mid_x), (mid_y, img2.shape[0])), ((mid_x, img2.shape[1]), (mid_y, img2.shape[0]))]
-        # boundary5 = (int(mid_x / 2), int(mid_x + mid_x / 2), int(mid_y / 2), int(mid_y + mid_y / 2))
-        # regions_boundries_1 = [(0, mid_x, 0, mid_y), (mid_x, img1.shape[1], 0, mid_y),
-        #                      (0, mid_x, mid_y, img1.shape[0]), (mid_x, img1.shape[1], mid_y, img1.shape[0]), boundary5]
-        # regions_boundries_2 = [(0, mid_x, 0, mid_y), (mid_x, img2.shape[1], 0, mid_y), (0, mid_x, mid_y, img2.shape[0]),
-        #                       (mid_x, img2.shape[1], mid_y, img2.shape[0]), boundary5]
 
-        # Try slices instead
         point_0 = 0
         point_1 = img1.shape[0] / 4
         step = (img1.shape[0] / 3) / 2
@@ -1357,18 +1375,7 @@ class VideoStitcher:
             point_1 += step
         if (point_1 < img1.shape[0]):
             regions_boundries_1.append((0, img1.shape[1], point_0, img1.shape[0]))
-        # vertical slices
-        # point_0 = 0
-        # point_1 = img1.shape[0] / 5
-        # step = (img1.shape[0] / 5) / 2
 
-        # while (point_1 <= img1.shape[0]):
-        #    regions_boundries_1.append((point_0, point_1, 0, img1.shape[0]))
-        #    # temp_step = step
-        #    point_0 += step
-        #    point_1 += step
-        # if (point_1 < img1.shape[0]):
-        #    regions_boundries_1.append((point_0, img1.shape[0], 0, img1.shape[0]))
         regions_1 = partitionKeypoints2(img1, kp1, des1, regions_boundries_1)
         regions_1 = cutSmallestRegions(regions_1)
         # print(len(regions_1[0]))
@@ -1384,10 +1391,6 @@ class VideoStitcher:
         count_1 = 0
         count_2 = 0
 
-        # reg_des_1 =np.array(reg_des_1)
-        # reg_des_2 =np.array(reg_des_2)
-
-        # region_1[1] = np.array(region_1[1])
         region_index_1 = 0
         region_index_2 = 0
         best_1 = -1
@@ -1437,19 +1440,17 @@ class VideoStitcher:
                 distance.append(m.distance)
                 src_pt = best_region_1[0][m.queryIdx].pt
                 dst_pt = best_region_2[0][m.trainIdx].pt
-                # src_pts.append(src_pt)
-                # dst_pts.append(dst_pt)
+
                 avg_x_change += abs(src_pt[0] - dst_pt[0])
                 avg_y_change += abs(src_pt[1] - dst_pt[1])
             distance = np.array(distance)
 
-            # print(distance.sum()/len(distance))
             avg_x_change = avg_x_change / len(good)
             avg_y_change = avg_y_change / len(good)
 
             deviation = 10
             filter_count = 0
-            # print("Good: ", len(good))
+            #print("Good: ", len(good))
             for m in good:
                 src_pt = best_region_1[0][m.queryIdx].pt
                 dst_pt = best_region_2[0][m.trainIdx].pt
@@ -1467,31 +1468,22 @@ class VideoStitcher:
             dst_pts = np.float32(dst_pts).reshape(-1, 1, 2)
             if (len(src_pts) >= MIN_MATCH_COUNT):
 
-                #
-                # print(filter_count)
-                # src_pts = np.float32([best_region_1[0][m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
-                # dst_pts = np.float32([best_region_2[0][m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
                 H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 3.0)
                 img3 = cv2.drawMatches(img1, best_region_1[0], img2, best_region_2[0], good, None,
                                        flags=cv2.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS)
                 cv2.imwrite("Matching_keypoints.jpg", img3)
-                # H = cv2.getPerspectiveTransform(src_pts, dst_pts)
                 matchesMask = mask.ravel().tolist()
-                # h, w, c = img2.shape
-                # pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
-                # dst = cv2.perspectiveTransform(pts, M)
-                # dst are the corners of the left image on the right image.
 
-                # img2 = cv2.polylines(img2, [np.int32(dst)], True, 255, 3, cv2.LINE_AA)
-                # cv2.imshow("Test", img2)
-                # cv2.waitKey(0)
             else:
                 print("Not enough points")
+                return None
                 H = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
         else:
             print("Not enough matches are found - {}/{}".format(len(good), MIN_MATCH_COUNT))
             matchesMask = None
             return None
+        #print("End getHMatrixRegions")
+
         return H
 
     def gen_label_dict(self, img_labels):
@@ -1566,13 +1558,15 @@ class VideoStitcher:
     def run(self):
         # self.logreg = ImageValidator.get_model(["videos_og", "videos_og_1"], "videos_shifted", 1000)
 
-        self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",
-                           r".\\take_1_trimmed\\output_2.mp4"], 15)
+        #self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",
+        #                   r".\\take_1_trimmed\\output_2.mp4"], 15)
 
-        #self.stitchVideos([r".\\rain_recording\\output_0.mp4", r".\\rain_recording\\output_1.mp4",r".\\rain_recording\\output_2.mp4"], 15)
+        self.stitchVideos([r".\\rain_recording\\output_0.mp4", r".\\rain_recording\\output_1.mp4",r".\\rain_recording\\output_2.mp4"], 15)
 
     # below is test code for single set of frames
     def create_seam_masks(self, img1, img2):
+        #print("Gen Masks Start")
+
         startTime = time.time()
         dst = cv2.warpPerspective(img2, self.H, (img1.shape[1] + 500, img1.shape[0]), borderMode=cv2.BORDER_CONSTANT)
 
@@ -1584,21 +1578,17 @@ class VideoStitcher:
         seam_1 = img1[:, int(x_min):int(x_max - x_min)]
         seam_2 = dst[:, int(x_min):int(x_max - x_min)]
         self.img_scores_dict, superpixel_graph, superpixels = self.superpixel_cost_estimation(seam_1, seam_2)
-        lowest_cost_path = self.find_lowest_cost_path(img_scores_dict, superpixel_graph, superpixels)
+        lowest_cost_path = self.find_lowest_cost_path(self.img_scores_dict, superpixel_graph, superpixels)
         lowest_cost_path_img = (seam_1) * 0
         seam1_supers = cv2.ximgproc.createSuperpixelSLIC(seam_1)
         seam1_supers.iterate(50)
-        # print(lowest_cost_path[1])
-        # print(len(seam1_supers.getLabels())," : ",len(seam1_supers.getLabels()[0]))
+
+
         startTime2 = time.time()
         for y in range(0, len(seam1_supers.getLabels())):
-            # print(y)
             for x in range(0, len(seam1_supers.getLabels()[0])):
-                # print(seam1_supers.getLabels()[x][y])
-                # print(x)
                 if seam1_supers.getLabels()[y][x] in lowest_cost_path[1]:
                     lowest_cost_path_img[y][x] = (255, 255, 255)
-                    # print("breaking")
                     break
                 lowest_cost_path_img[y][x] = (255, 255, 255)
         print("Gen masks time:", time.time() - startTime2)
@@ -1726,7 +1716,7 @@ class VideoStitcher:
         for superpixel in set(superpixels.getLabels().flatten()):
             sp_dict[superpixel] = [math.inf, []]
         top_superpixels = set(superpixels.getLabels()[0])
-        print("Top Superpixels:", top_superpixels)
+        #print("Top Superpixels:", top_superpixels)
         for superpixel in top_superpixels:
             sp_dict[superpixel][0] = 0
             # print(sp_dict[superpixel][1])
@@ -1739,7 +1729,7 @@ class VideoStitcher:
         for bottom_superpixel in bottom_superpixels:
             if sp_dict[bottom_superpixel][0] < lowest_cost_path[0]:
                 lowest_cost_path = sp_dict[bottom_superpixel]
-        print(lowest_cost_path)
+        #print(lowest_cost_path)
         return lowest_cost_path
 
     def recursive_find(self, img_scores, sp_dict, source, superpixel_graph):
@@ -1776,7 +1766,7 @@ class VideoStitcher:
     def build_superpixel_graph2(self, superpixels, cost_graph):
         superpixel_graph = {}
         # We can say there is a path between superpixels if they are adjacent to eaachother
-        print("num of supers:", superpixels[-1][-1])
+        #print("num of supers:", superpixels[-1][-1])
         # Loop through Row
         curr_id = -1
         for y in range(0, len(superpixels[0])):
@@ -1796,7 +1786,7 @@ class VideoStitcher:
 
         # for key in superpixel_graph.keys():
         #    print(key, ":", superpixel_graph[key])
-        print("graph size: ", len(superpixel_graph))
+        #print("graph size: ", len(superpixel_graph))
 
         return superpixel_graph
 
