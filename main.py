@@ -935,7 +935,7 @@ def generate_training_data(videos):
 
 class VideoStitcher:
     def __init__(self):
-        self.seam_size = 20
+        self.seam_size = 50
         self.H = None
         self.logreg = None
         self.bounds = None
@@ -1094,7 +1094,7 @@ class VideoStitcher:
         #cv2.imshow("Joined", joined_img)
         #cv2.waitKey(0)
         result = dst
-        result[:, int(x_min):int(x_max - x_min)] = joined_img
+        result[:, int(x_min):int(x_min)+joined_img.shape[1]] = joined_img
         result[:, 0:(int(x_min))] = img1[:, 0:(int(x_min))]
 
         # result = get_seams(dst, img1, seam_size, factors, bounds)
@@ -1491,7 +1491,7 @@ class VideoStitcher:
         return H
 
     def gen_label_dict(self, img_labels):
-
+        x_range = [math.inf,-math.inf]
         img_dict = {}
         # img_dict = {coords, bounds}
         print("labels:", len(img_labels[0]))
@@ -1501,7 +1501,12 @@ class VideoStitcher:
         for y in range(0, len(img_labels)):
             for x in range(0, len(img_labels[0])):
                 value = img_labels[y][x]
-
+                #Get leftmost pixel on path
+                if x < x_range[0]:
+                    x_range[0] = 0
+                #Get rightmostpixel on path
+                if x > x_range[1]:
+                    x_range[1] = x
                 if img_labels[y][x] not in img_dict.keys():
                     # print(value)
                     img_dict[value] = [[(y, x)], []]
@@ -1536,7 +1541,7 @@ class VideoStitcher:
             # print("superpixel:", value, ",", (start_pos, i))
 
             start_pos = 0
-        return img_dict
+        return img_dict, x_range
         # print(len(slic_result.getLabels()))
 
     def get_superpixel_scores(self, img1, label_dict, img2):
@@ -1574,7 +1579,7 @@ class VideoStitcher:
         img3_superpixel_mask = img2_superpixels.getLabelContourMask()
 
         # to make processing easier, we can create a dictionary for each image, which has a label as its key, and a list of coordiantes are items
-        img1_dict = self.gen_label_dict(img1_superpixel_labels)
+        img1_dict, x_range = self.gen_label_dict(img1_superpixel_labels)
         # img2_dict = self.gen_label_dict(img2_superpixel_labels)
         # Scores closer to 1 are more similar
 
@@ -1601,7 +1606,7 @@ class VideoStitcher:
         # cv2.waitKey(0)
         superpixel_graph = self.build_superpixel_graph2(img1_superpixel_labels, img_scores_dict)
         # print("SP Grah:", superpixel_graph)
-        return img_scores_dict, superpixel_graph, img1_superpixels, img1_dict
+        return img_scores_dict, superpixel_graph, img1_superpixels, img1_dict,x_range
         # print(len(img1_dict[0]))
 
     def run(self):
@@ -1626,11 +1631,11 @@ class VideoStitcher:
 
         seam_1 = img1[:, int(x_min):int(x_max - x_min)]
         seam_2 = dst[:, int(x_min):int(x_max - x_min)]
-        self.img_scores_dict, superpixel_graph, seam1_supers, img1_dict = self.superpixel_cost_estimation(seam_1,
+        self.img_scores_dict, superpixel_graph, seam1_supers, img1_dict, x_range = self.superpixel_cost_estimation(seam_1,
                                                                                                           seam_2)
         lowest_cost_path = self.find_lowest_cost_path(self.img_scores_dict, superpixel_graph, seam1_supers)
-        lowest_cost_path_img = np.zeros(seam_1.shape)
-        lowest_cost_path_inv = np.zeros(seam_1.shape)
+        lowest_cost_path_img = np.zeros((seam_1.shape[0],x_range[1] - x_range[0] + self.seam_size,3))
+        lowest_cost_path_inv = np.zeros((seam_1.shape[0],x_range[1] - x_range[0] + self.seam_size,3))
         # = 0
         startTime2 = time.time()
         row_dict = {}
@@ -1639,7 +1644,7 @@ class VideoStitcher:
         center = 0.5
         steps = int(self.seam_size / 2)
         print("steps", steps)
-        test = computeBlendingMatrix((1, self.seam_size, 3))
+        blending_matrix = computeBlendingMatrix((1, self.seam_size, 3))
 
         for superpixel in lowest_cost_path[1]:
             # print(superpixel, ":")
@@ -1654,9 +1659,9 @@ class VideoStitcher:
         for row in row_dict.keys():
             lowest_cost_path_img[row, :row_dict[row]] = 1
             lowest_cost_path_inv[row, row_dict[row]:] = 1
-            print(test.shape)
-            lowest_cost_path_inv[row, row_dict[row] - int(self.seam_size / 2): row_dict[row]+int(self.seam_size / 2)] = test[1][0:lowest_cost_path_inv[row, row_dict[row] - int(self.seam_size / 2): row_dict[row]+int(self.seam_size / 2)].shape[1]]
-            lowest_cost_path_img[row, row_dict[row] - int(self.seam_size / 2): row_dict[row]+int(self.seam_size / 2)] = test[0][0:lowest_cost_path_img[row, row_dict[row] - int(self.seam_size / 2): row_dict[row]+int(self.seam_size / 2)].shape[1]]
+
+            lowest_cost_path_inv[row, row_dict[row] - int(self.seam_size / 2): row_dict[row]+int(self.seam_size / 2)] = blending_matrix[1]
+            lowest_cost_path_img[row, row_dict[row] - int(self.seam_size / 2): row_dict[row]+int(self.seam_size / 2)] = blending_matrix[0]
 
             # lowest_cost_path_img[row, row_dict[row]] = 0.5
             # lowest_cost_path_inv[row, row_dict[row]] = 0.5
@@ -1807,7 +1812,7 @@ class VideoStitcher:
 
     def build_superpixel_graph2(self, superpixels, cost_graph):
         superpixel_graph = {}
-        # We can say there is a path between superpixels if they are adjacent to eaachother
+        # We can say there is a path between superpixels if they are adjacent to eachother
         # print("num of supers:", superpixels[-1][-1])
         # Loop through Row
         curr_id = -1
