@@ -899,6 +899,7 @@ def generate_training_data(videos):
             # H, bounds, factors = preprocessing(frames_og,shapes, seam_size)
 
             # H, bounds, factors=preprocessing(frames_og,shapes, seam_size)
+
             H, bounds, factors = preprocessing(frames_og, shapes, seam_size)
             print(H)
             # buffer_runner = executor.submit(checkBuffer, *[buffer, next_tag, out_1])
@@ -935,6 +936,11 @@ def generate_training_data(videos):
 
 class VideoStitcher:
     def __init__(self):
+        self.wiggle = 0.01
+        self.curr_diff = None
+        self.curr_x_range = None
+        self.optimal_path = None
+        self.current_superpixels_dict = None
         self.seam_size = 50
         self.H = None
         self.logreg = None
@@ -1005,6 +1011,77 @@ class VideoStitcher:
             sum += img_scores_dict[key]
         return sum
 
+    def validateOptimalPath(self,buffer):
+        print("validateOptimalPath")
+        timeout2 = 0
+        # print("Hit")
+        while timeout2 < 100:
+            # print(type(self.current_frames))
+            if self.current_frames is not None and not self.dopreprocessing:
+                timeout2 = 0
+
+                #print(shapes)
+                #self.optimal_seam
+                #self.superpixel_graph
+                #self.current_superpixels_dict
+                #then use this info to get an absdiff
+                #np.zeros((seam_1.shape[0],x_range[1] - x_range[0] + self.seam_size,3))
+
+                frames = self.current_frames
+                img2 = cv2.cvtColor(frames[1], cv2.COLOR_BGR2GRAY)
+                img1 = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
+
+                dst = cv2.warpPerspective(img2, self.H, (img1.shape[1] + 500, img1.shape[0]), borderMode=cv2.BORDER_CONSTANT)
+
+                x_min = max(self.corners[0][0][0], self.corners[1][0][0])
+                x_max = min(self.corners[2][0][0], self.corners[3][0][0])
+                y_min = max(self.corners[0][0][1], self.corners[3][0][1])
+                y_max = min(self.corners[1][0][1], self.corners[2][0][1])
+
+                seam_1 = img1[:, int(x_min):int(x_max - x_min)]
+                seam_2 = dst[:, int(x_min):int(x_max - x_min)]
+                #np.zeros(seam_1.shape)
+                base_mask = np.zeros(seam_1.shape, dtype=np.uint8)
+                #print("validateOptimalPath: Base Mask Done")
+                total_colored = 0
+                #print(self.optimal_path[1])
+                for superpixel in self.optimal_path[1]:
+                    #print("hit")
+                    #print(self.current_superpixels_dict[superpixel][1])
+                    for row in self.current_superpixels_dict[superpixel][1]:
+                        row_num = row[2]
+                        #self.current_superpixels_dict[superpixel][1][0:2]
+                        base_mask[row_num, row[0]:row[1]] = 1
+                        total_colored += abs(row[1] - row[0])
+                    #row = self.current_superpixels_dict[superpixel][1][2]
+                    #print("Row:", row)
+                    #self.current_superpixels_dict[superpixel][1][0:2]
+                total_colored = total_colored * 255
+                #print("Base Mask", base_mask)
+                #cv2.imshow("Base mask",base_mask)
+                seam_1 = seam_1 * base_mask
+                seam_2 = seam_2 * base_mask
+                diffs = cv2.absdiff(seam_1,seam_2)
+
+                #temp variable for testing
+                #total_colored = seam_1.shape[0] * 255 * 3 + seam_1.shape[1] *255 * 3
+                difference = np.sum(diffs) / total_colored
+                #print("new_diff:",difference)
+                if self.curr_diff is None:
+                    self.curr_diff = difference
+                    print("Curr_diff:", self.curr_diff)
+                elif difference > self.curr_diff + self.wiggle:
+                    print("Mismatch detected, setting preprocessing flag")
+                    print("Diff:", difference, "Curr_diff", self.curr_diff)
+
+                    self.curr_diff = difference
+                    self.dopreprocessing = True
+            else:
+                # print("validation waiting")
+                if not self.dopreprocessing:
+                    timeout2 += 1
+                    time.sleep(0.1)
+        print("validation time out")
     def validateStitchDiffs(self, buffer, shapes, seam_size, threshold):
         timeout2 = 0
         # print("Hit")
@@ -1151,10 +1228,18 @@ class VideoStitcher:
     def preprocessing(self, frames_og, shapes, seam_size):
         print("running preprocessing")
         startTime = time.time()
-        self.H = self.getHMatrixRegions(frames_og, shapes)
-        # print("H Mat done")
-        if np.sum(self.H) == 0:
+        temp_H = None
+        temp_H = self.getHMatrixRegions(frames_og, shapes)
+        if temp_H is None:
+            self.dopreprocessing = True
             return
+        # print("H Mat done")
+        if np.sum(temp_H) == 0:
+            self.dopreprocessing = True
+
+            return
+        self.H = temp_H
+
         # print(time.time() - startTime)
         # H[0] performs X shift
         # H[1][0] peforms y hift
@@ -1181,6 +1266,10 @@ class VideoStitcher:
         print("Cpu stitch done")
         cv2.imwrite("Init_stitch_sub.jpg", init_stitch)
         cv2.imwrite("init_stitch.jpg", init_stitch)
+
+        if np.sum(self.H) > 0:
+            self.dopreprocessing = False
+
 
     def redo_preprocessing(self, frames_og, shapes, seam_size):
         print("running redo_preprocessing")
@@ -1306,20 +1395,25 @@ class VideoStitcher:
                     # print(count)
                     continue
 
-                if self.H is None or self.dopreprocessing:
+                if self.dopreprocessing and not initial:
                     # place this at the end of the highest priority list, since it should always be run asap when needed
                     # priorityList[0].append((preprocessing,[frames_og,shapes, seam_size]))
                     # H, bounds, factors = preprocessing(frames_og,shapes, seam_size)
 
                     # H, bounds, factors=preprocessing(frames_og,shapes, seam_size)
-                    self.preprocessing(frames_og, shapes, seam_size)
-                    if np.sum(self.H) > 0:
-                        self.dopreprocessing = False
-                    # print(self.H)
-                    else:
-                        continue
+                    self.current_frames = frames_og
+                    self.dopreprocessing = False
+                    executor.submit(self.preprocessing, *[frames_og, shapes, seam_size])
+
                 if initial:
-                    executor.submit(self.validateStitchDiffs, *[buffer, shapes, seam_size, 0.9])
+                    #Stich Validation
+                    self.preprocessing(frames_og, shapes, seam_size)
+
+                    print("Pre spawn validateOptimalPath")
+                    executor.submit(self.validateOptimalPath, *[buffer])
+                    print("Post spawn validateOptimalPath")
+
+                    #self.validateOptimalPath(buffer)
                     buffer_runner = executor.submit(self.checkBuffer, *[buffer, next_tag, out_1])
                     initial = False
                 # if SVM return false
@@ -1495,7 +1589,7 @@ class VideoStitcher:
         x_range = [math.inf,-math.inf]
         img_dict = {}
         # img_dict = {coords, bounds}
-        print("labels:", len(img_labels[0]))
+        #print("labels:", len(img_labels[0]))
         curr_superpixel = -1
         start_pos = 0
         # img_dict[y][x]
@@ -1572,21 +1666,15 @@ class VideoStitcher:
         img1_superpixel_labels = img1_superpixels.getLabels()
         img1_superpixel_mask = img1_superpixels.getLabelContourMask()
 
-        img2_superpixels = cv2.ximgproc.createSuperpixelSLIC(img2)
-        img2_superpixels.iterate(50)
-
-        img2_num_of_superpixels = img2_superpixels.getNumberOfSuperpixels()
-        img2_superpixel_labels = img2_superpixels.getLabels()
-        img3_superpixel_mask = img2_superpixels.getLabelContourMask()
-
         # to make processing easier, we can create a dictionary for each image, which has a label as its key, and a list of coordiantes are items
+        #img1_dict[0] contains the x,y position of each super pixel
+        #img1_dict[1] containts the x range of each super pixel, and the row for that range
         img1_dict, x_range = self.gen_label_dict(img1_superpixel_labels)
         # img2_dict = self.gen_label_dict(img2_superpixel_labels)
         # Scores closer to 1 are more similar
-
+        self.current_superpixels_dict = img1_dict
         print(img1_dict[1][1])
         img_scores_dict = self.get_superpixel_scores(img1, img1_dict, img2)
-
         # img2[0:img1.shape[0], 0:img1.shape[1]] = img1
         # print("Gray shape:", cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY))
         # diffIntensity = (cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY))
@@ -1613,9 +1701,9 @@ class VideoStitcher:
     def run(self):
         # self.logreg = ImageValidator.get_model(["videos_og", "videos_og_1"], "videos_shifted", 1000)
 
-        self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",r".\\take_1_trimmed\\output_2.mp4"], 15)
+        #self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",r".\\take_1_trimmed\\output_2.mp4"], 15)
 
-        #self.stitchVideos([r".\\rain_recording\\output_0.mp4", r".\\rain_recording\\output_1.mp4",r".\\rain_recording\\output_2.mp4"], 15)
+        self.stitchVideos([r".\\rain_recording\\output_0.mp4", r".\\rain_recording\\output_1.mp4",r".\\rain_recording\\output_2.mp4"], 15)
 
     # below is test code for single set of frames
     def create_seam_masks(self, img1, img2):
@@ -1632,8 +1720,11 @@ class VideoStitcher:
         seam_1 = img1[:, int(x_min):int(x_max - x_min)]
         seam_2 = dst[:, int(x_min):int(x_max - x_min)]
         self.img_scores_dict, superpixel_graph, seam1_supers, img1_dict, x_range = self.superpixel_cost_estimation(seam_1,
-                                                                                                          seam_2)
+                                                                                                       seam_2)
+        self.curr_x_range = x_range
         lowest_cost_path = self.find_lowest_cost_path(self.img_scores_dict, superpixel_graph, seam1_supers)
+        self.optimal_path = lowest_cost_path
+
         lowest_cost_path_img = np.zeros((seam_1.shape[0],x_range[1] - x_range[0] + self.seam_size,3))
         lowest_cost_path_inv = np.zeros((seam_1.shape[0],x_range[1] - x_range[0] + self.seam_size,3))
         # = 0
@@ -1643,9 +1734,9 @@ class VideoStitcher:
         rightmost = 0
         center = 0.5
         steps = int(self.seam_size / 2)
-        print("steps", steps)
+        #print("steps", steps)
         blending_matrix = computeBlendingMatrix((1, self.seam_size, 3))
-        print(lowest_cost_path[1])
+        #print(lowest_cost_path[1])
         for superpixel in lowest_cost_path[1]:
             # print(superpixel, ":")
             for coord in img1_dict[superpixel][1]:
