@@ -1018,6 +1018,7 @@ class VideoStitcher:
                 new_H = self.getHMatrixRegions(frames, shapes)
                 # score = self.img_scores_sum(self.img_scores_dict)
                 if new_H is None:
+                    self.dopreprocessing = True
                     continue
                 img1 = frames[1]
                 img2 = frames[0]
@@ -1228,7 +1229,7 @@ class VideoStitcher:
                         # pass
                     next_tag += 1
                 if timeout2 > time_cap:
-                    print("time_cap")
+                    #print("time_cap")
                     timeout2 = 0
                     new_frame = buffer.pop()
                     next_tag = new_frame[0] + 1
@@ -1612,10 +1613,9 @@ class VideoStitcher:
     def run(self):
         # self.logreg = ImageValidator.get_model(["videos_og", "videos_og_1"], "videos_shifted", 1000)
 
-        #self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",
-        #                   r".\\take_1_trimmed\\output_2.mp4"], 15)
+        self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",r".\\take_1_trimmed\\output_2.mp4"], 15)
 
-        self.stitchVideos([r".\\rain_recording\\output_0.mp4", r".\\rain_recording\\output_1.mp4",r".\\rain_recording\\output_2.mp4"], 15)
+        #self.stitchVideos([r".\\rain_recording\\output_0.mp4", r".\\rain_recording\\output_1.mp4",r".\\rain_recording\\output_2.mp4"], 15)
 
     # below is test code for single set of frames
     def create_seam_masks(self, img1, img2):
@@ -1645,7 +1645,7 @@ class VideoStitcher:
         steps = int(self.seam_size / 2)
         print("steps", steps)
         blending_matrix = computeBlendingMatrix((1, self.seam_size, 3))
-
+        print(lowest_cost_path[1])
         for superpixel in lowest_cost_path[1]:
             # print(superpixel, ":")
             for coord in img1_dict[superpixel][1]:
@@ -1683,7 +1683,7 @@ class VideoStitcher:
         img2_gray = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
         shapes = [img1.shape, img2.shape]
         frames_og = [img1, img2]
-        seam_size = 50
+        seam_size = 24
         self.seam_size = seam_size
         self.preprocessing(frames_og, shapes, seam_size)
         startTime = time.time()
@@ -1816,20 +1816,30 @@ class VideoStitcher:
         # print("num of supers:", superpixels[-1][-1])
         # Loop through Row
         curr_id = -1
-        for y in range(0, len(superpixels[0])):
+        buff_size = 0
+        edgeBuffer = buff_size
+        for x in range(0, len(superpixels)-1):
             # loop through column
             curr_id = -1
-            for x in range(0, len(superpixels)):
-                # if y+1 < len(superpixels[0]):
-                if superpixels[x][y] != curr_id and curr_id != -1:
-                    if curr_id not in superpixel_graph:
-                        superpixel_graph[curr_id] = set(curr_id)
 
-                    else:
-                        superpixel_graph[curr_id].add(superpixels[x][y])
-                curr_id = superpixels[x][y]
-                if curr_id not in superpixel_graph:
-                    superpixel_graph[curr_id] = set()
+            for y in range(0, len(superpixels[0])-1):
+                # if y+1 < len(superpixels[0]):
+                if y+buff_size < len(superpixels[0]):
+                    curr_id = superpixels[x][y]
+
+                    if curr_id not in superpixel_graph:
+                        superpixel_graph[curr_id] = set()
+                    #if edgeBuffer >= buff_size and superpixels[x][y+buff_size] != curr_id:
+                    if True:
+                        if superpixels[x+1][y] != curr_id and curr_id != -1:
+                            if curr_id not in superpixel_graph:
+                                superpixel_graph[curr_id] = set(curr_id)
+
+                            else:
+                                superpixel_graph[curr_id].add(superpixels[x+1][y])
+                    edgeBuffer+=1
+                    if superpixels[x][y+1] != curr_id:
+                        edgeBuffer = 0
 
         # for key in superpixel_graph.keys():
         #    print(key, ":", superpixel_graph[key])
