@@ -1829,17 +1829,17 @@ class VideoStitcher:
 
                     if curr_id not in superpixel_graph:
                         superpixel_graph[curr_id] = set()
-                    #if edgeBuffer >= buff_size and superpixels[x][y+buff_size] != curr_id:
-                    if True:
+                    if (edgeBuffer >= buff_size and superpixels[x][y+buff_size] != curr_id) or buff_size == 0:
+                    #if True:
                         if superpixels[x+1][y] != curr_id and curr_id != -1:
                             if curr_id not in superpixel_graph:
                                 superpixel_graph[curr_id] = set(curr_id)
 
                             else:
                                 superpixel_graph[curr_id].add(superpixels[x+1][y])
-                    edgeBuffer+=1
-                    if superpixels[x][y+1] != curr_id:
-                        edgeBuffer = 0
+                edgeBuffer+=1
+                if superpixels[x][y+1] != curr_id:
+                    edgeBuffer = 0
 
         # for key in superpixel_graph.keys():
         #    print(key, ":", superpixel_graph[key])
