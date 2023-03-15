@@ -1121,16 +1121,18 @@ class VideoStitcher:
                 seam_1_og = seam_1
                 seam_2_og = seam_2
                 #print("test")
-                seam_1 = adaptive_thresholding([seam_1],0)[0]
+                #seam_1 = adaptive_thresholding([seam_1],0)[0]
+                seam_1 = gradiant_image(seam_1)
                 #print("test2")
-                seam_2 = adaptive_thresholding([seam_2],0)[0]
+                #seam_2 = adaptive_thresholding([seam_2],0)[0]
+                seam_2 = gradiant_image(seam_2)
 
                 #print("=======================\nseam_1:",np.sum(seam_1))
                 #print("seam_2:",np.sum(seam_2),"\n====================")
 
 
                 #print(seam_1)
-                diffs = cv2.absdiff(seam_1,seam_2)/255
+                diffs = cv2.absdiff(seam_1,seam_2)
 
                 #print(np.sum(diffs))
                 #temp variable for testing
@@ -1147,7 +1149,8 @@ class VideoStitcher:
                 if self.curr_diff is None:
                     self.curr_diff = difference
                     print("Curr_diff:", self.curr_diff)
-                elif difference > 0.23:
+                #0.23 worked well with previous thresholding
+                elif difference > 0.07:
                     if not self.preprocessing_in_progress:
 
                         print("Mismatch detected, setting preprocessing flag")
@@ -1160,8 +1163,8 @@ class VideoStitcher:
                         while exists(base_path + str(index) + "_0.jpg"):
                             index += 1
                         #hconcated = cv2.hconcat(seam_1,seam_2)
-                        cv2.imwrite(base_path + str(index) + "_0.jpg", seam_1)
-                        cv2.imwrite(base_path + str(index) + "_1.jpg", seam_2)
+                        cv2.imwrite(base_path + str(index) + "_0.jpg", seam_1*255)
+                        cv2.imwrite(base_path + str(index) + "_1.jpg", seam_2*255)
                         cv2.imwrite(native_base_path + str(index) + "_0.jpg", seam_1_og)
                         cv2.imwrite(native_base_path + str(index) + "_1.jpg", seam_2_og)
 
@@ -1171,8 +1174,8 @@ class VideoStitcher:
                 else:
                     #print("match")
 
-                    cv2.imwrite(match_base_path + str(index) + "_0.jpg", seam_1)
-                    cv2.imwrite(match_base_path + str(index) + "_1.jpg", seam_2)
+                    cv2.imwrite(match_base_path + str(index) + "_0.jpg", seam_1*255)
+                    cv2.imwrite(match_base_path + str(index) + "_1.jpg", seam_2*255)
 
                 #cv2.imshow("seam_1", seam_1)
                 #cv2.imshow("seam_2", seam_2)
@@ -1330,7 +1333,7 @@ class VideoStitcher:
 
     def getHMatrix(self,frames):
         H = None
-        MIN_MATCH_COUNT = 10
+        MIN_MATCH_COUNT = 15
 
         # Initiate SIFT detector
         sift = cv2.SIFT_create()
@@ -1351,7 +1354,7 @@ class VideoStitcher:
         good = []
         H = None
         for m, n in matches:
-            if m.distance < 0.7 * n.distance:
+            if m.distance < 0.6 * n.distance:
                 good.append(m)
         if len(good) > MIN_MATCH_COUNT:
             src_pts = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
@@ -1374,6 +1377,8 @@ class VideoStitcher:
 
         temp_H = None
         temp_H = self.getHMatrixRegions(frames_og, shapes)
+        #temp_H = self.getHMatrix(frames_og)
+
         if temp_H is None:
             self.dopreprocessing = True
             #self.preprocessing_in_progress = False
@@ -1571,7 +1576,7 @@ class VideoStitcher:
 
     def stitchVideos(self, videos, fps):
         print(os.cpu_count())
-        frame_skip = 2800
+        frame_skip = 1000
         fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
         stitcher_time = ""
         fixed_H_time = ""
@@ -1674,7 +1679,7 @@ class VideoStitcher:
     def getHMatrixRegions(self, frames, shapes):
         # print("Start getHMatrixRegions")
         H = None
-        MIN_MATCH_COUNT = 10
+        MIN_MATCH_COUNT = 15
         # Initiate SIFT detector
         sift = cv2.SIFT_create()
         # find the keypoints and descriptors with SIFT
@@ -1925,9 +1930,9 @@ class VideoStitcher:
     def run(self):
         # self.logreg = ImageValidator.get_model(["videos_og", "videos_og_1"], "videos_shifted", 1000)
 
-        #self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",r".\\take_1_trimmed\\output_2.mp4"], 15)
+        self.stitchVideos([r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4",r".\\take_1_trimmed\\output_2.mp4"], 15)
 
-        self.stitchVideos([r".\\rain_recording\\output_0.mp4", r".\\rain_recording\\output_1.mp4",r".\\rain_recording\\output_2.mp4"], 15)
+        #self.stitchVideos([r".\\rain_recording\\output_0.mp4", r".\\rain_recording\\output_1.mp4",r".\\rain_recording\\output_2.mp4"], 15)
         #self.preprocessing_tests([r".\\rain_recording\\output_0.mp4", r".\\rain_recording\\output_1.mp4",r".\\rain_recording\\output_2.mp4"], 15)
 
     # below is test code for single set of frames
@@ -2201,8 +2206,19 @@ def adaptive_thresholding(imgs, type):
     # print("Test3")
     return threshold_imgs
     # th3 = cv2.adaptiveThreshold(img,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,11,2)
+def gradiant_image(image):
+    img = np.float32(image) / 255.0
+    block = img[1200:1200 + 8, 1000:1000 + 8]
+    block = np.float32(block) / 255.0
+    # Calculate gradient
+    gx = cv2.Sobel(img, cv2.CV_32F, 1, 0, ksize=1)
+    gy = cv2.Sobel(img, cv2.CV_32F, 0, 1, ksize=1)
 
+    # block_mag, block_angle = cv2.cartToPolar(block_gx, block_gy, angleInDegrees=True)
+    mag, angle = cv2.cartToPolar(gx, gy, angleInDegrees=True)
 
+    combined = cv2.addWeighted(gx, 0.5, gy, 0.5, 0)
+    return combined
 def main():
     # generate_training_data(
     #    [r".\\take_1_trimmed\\output_1.mp4", r".\\take_1_trimmed\\output_0.mp4", r".\\take_1_trimmed\\output_2.mp4"])
